@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 
+from integration.webhooks import router as webhooks_router
+
 app = FastAPI(title="PSTG Integrations")
+app.include_router(webhooks_router)
 
 
 @app.get("/healthz")

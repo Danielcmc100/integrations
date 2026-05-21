@@ -49,8 +49,8 @@
         "Tests pass (valid sig, invalid sig, duplicate delivery)"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented integration/webhooks.py with POST /webhooks/github. HMAC SHA-256 verified via hmac.compare_digest against settings.github_webhook_secret. Invalid/missing signature -> 401. Valid: persists WebhookEventLog row (source=github, payload_hash=X-GitHub-Delivery, status=pending) then enqueues ARQ job 'process_github_event' via integration/queue.py ArqEnqueuer (lazy redis pool). Dedupe by querying existing log with same source+delivery id; duplicate returns 200 {status: duplicate} without enqueue. FastAPI deps in integration/deps.py (SessionDep, EnqueuerDep) allow test overrides. Settings extended with redis_url, github_webhook_secret, plane_webhook_secret. Tests cover valid sig, invalid sig, missing sig, and duplicate delivery."
     },
     {
       "id": "US-004",
