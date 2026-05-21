@@ -29,15 +29,19 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "C4", "RUF"]
 ignore = []
 
 [tool.basedpyright]
-include = ["main.py"]
-exclude = [".venv", "**/__pycache__"]
+include = ["main.py", "integration", "tests", "alembic/env.py"]
+exclude = [".venv", "**/__pycache__", "alembic/versions"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingImports = "error"
 reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
