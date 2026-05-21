@@ -1,0 +1,43 @@
+[project]
+name = "integrations"
+version = "0.1.0"
+description = "Plane <-> GitHub <-> Discord integration service"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.13",
+    "arq>=0.26",
+    "asyncpg>=0.30",
+    "discord-py>=2.4",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "pydantic-settings>=2.5",
+    "sqlalchemy[asyncio]>=2.0",
+    "structlog>=24.4",
+    "uvicorn[standard]>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright==1.39.5",
+    "coverage>=7.14.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "ruff==0.15.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "C4", "RUF"]
+ignore = []
+
+[tool.basedpyright]
+include = ["main.py"]
+exclude = [".venv", "**/__pycache__"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportMissingImports = "error"
+reportMissingTypeStubs = false
