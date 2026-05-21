@@ -66,8 +66,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented POST /webhooks/plane in integration/webhooks.py. Shared-secret check via hmac.compare_digest against settings.plane_webhook_secret using X-Plane-Signature header; invalid or missing -> 401. Persists WebhookEventLog (source=plane, event_type=X-Plane-Event header, payload_hash=sha256(body), status=pending) then enqueues ARQ job 'process_plane_event'. Dedupe: queries existing log with source=plane AND payload_hash=sha256(body) AND received_at >= now-5min; duplicate returns 200 {status: duplicate} without enqueue. Tests in tests/test_webhooks_plane.py cover valid secret, invalid secret, missing secret, duplicate payload within window."
     },
     {
       "id": "US-005",
