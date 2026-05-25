@@ -82,8 +82,8 @@
         "Tests pass (mock httpx responses)"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "PlaneClient and GitHubClient implemented in integration/clients/. PlaneClient: get_card, create_card, update_card, add_comment, list_states, list_modules with rate-limit sleep (429/X-RateLimit-Remaining=0). GitHubClient: JWT RS256 + installation token flow with token caching; get_issue, create_issue, update_issue, close_issue, create_comment, get_pr, list_check_runs, get_branch_protection; rate-limit handling (429/403+zero-remaining). Both inject sleep/time_fn for test control. Tests used mock httpx transport; fixed expired JWT in test by adding verify_exp:False option; fixed Coroutine vs Awaitable type hint in _run helpers; fixed basedpyright strict Unknown propagation by casting list[Unknown] -> list[Any] and dict[Unknown,Unknown] -> dict[str,Any] before accessing. basedpyright: 0 errors; ruff: 0 errors; pytest: 17 passed."
     },
     {
       "id": "US-006",
