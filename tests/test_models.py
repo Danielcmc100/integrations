@@ -4,7 +4,10 @@ from sqlalchemy.types import TypeEngine
 from integration.models import (
     Base,
     CardIssueLink,
+    LabelMap,
+    RepoModuleMap,
     SyncSource,
+    UserMap,
     WebhookEventLog,
     WebhookSource,
     WebhookStatus,
@@ -51,3 +54,36 @@ def test_enum_members() -> None:
     assert {e.value for e in SyncSource} == {"plane", "github"}
     assert {e.value for e in WebhookSource} == {"plane", "github"}
     assert {e.value for e in WebhookStatus} == {"pending", "processed", "failed"}
+
+
+def test_repo_module_map_table() -> None:
+    table = _table(RepoModuleMap)
+    assert table.name == "repo_module_map"
+    pk_cols = [c.name for c in table.primary_key.columns]
+    assert pk_cols == ["plane_module_id"]
+    assert isinstance(table.c["plane_module_id"].type, String)
+    assert isinstance(table.c["plane_project_id"].type, String)
+    assert isinstance(table.c["gh_repo"].type, String)
+
+
+def test_label_map_table() -> None:
+    table = _table(LabelMap)
+    assert table.name == "label_map"
+    pk_cols = [c.name for c in table.primary_key.columns]
+    assert pk_cols == ["id"]
+    assert isinstance(table.c["id"].type, Integer)
+    assert isinstance(table.c["plane_project_id"].type, String)
+    assert isinstance(table.c["plane_label_id"].type, String)
+    assert isinstance(table.c["gh_repo"].type, String)
+    assert isinstance(table.c["gh_label"].type, String)
+
+
+def test_user_map_table() -> None:
+    table = _table(UserMap)
+    assert table.name == "user_map"
+    pk_cols = [c.name for c in table.primary_key.columns]
+    assert pk_cols == ["id"]
+    assert isinstance(table.c["id"].type, Integer)
+    assert isinstance(table.c["plane_user_id"].type, String)
+    assert isinstance(table.c["gh_login"].type, String)
+    assert table.c["discord_user_id"].nullable is True

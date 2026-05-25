@@ -52,6 +52,33 @@ class CardIssueLink(Base):
     )
 
 
+class RepoModuleMap(Base):
+    __tablename__ = "repo_module_map"
+
+    plane_module_id: Mapped[str] = mapped_column(String, primary_key=True)
+    plane_project_id: Mapped[str] = mapped_column(String, nullable=False)
+    gh_repo: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class LabelMap(Base):
+    __tablename__ = "label_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plane_project_id: Mapped[str] = mapped_column(String, nullable=False)
+    plane_label_id: Mapped[str] = mapped_column(String, nullable=False)
+    gh_repo: Mapped[str] = mapped_column(String, nullable=False)
+    gh_label: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class UserMap(Base):
+    __tablename__ = "user_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plane_user_id: Mapped[str] = mapped_column(String, nullable=False)
+    gh_login: Mapped[str] = mapped_column(String, nullable=False)
+    discord_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class WebhookEventLog(Base):
     __tablename__ = "webhook_event_log"
 
