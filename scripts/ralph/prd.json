@@ -155,8 +155,8 @@
         "Tests pass (including loop-prevention case)"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Shared helpers in integration/handlers/_sync.py: strip_footer (removes Plane/GitHub footers), should_skip_loop (5s window + source match), parse_dt, fetch_link_by_gh/plane, extract_gh_coords. GitHub→Plane: handle_issue_edited (title+body; footer stripped and re-added), handle_issue_labels_changed (labeled/unlabeled; maps full issue.labels list via label_map), handle_issue_assignees_changed (assigned/unassigned; maps full issue.assignees via user_map). Plane→GitHub: handle_card_updated (syncs name, description_html, label_ids, assignees; strips GH footer from plane desc, adds Plane footer to GH body). ConfigService.get_user_map_by_gh added. Both dispatchers updated. 16 new tests; 69 total passing. basedpyright: 0 errors; ruff: 0 errors."
     },
     {
       "id": "US-010",
