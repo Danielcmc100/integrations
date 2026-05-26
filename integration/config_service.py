@@ -80,3 +80,10 @@ class ConfigService:
             if lm.gh_repo == gh_repo and lm.gh_label == gh_label:
                 return lm
         return None
+
+    async def get_user_map_by_gh(self, gh_login: str) -> UserMap | None:
+        await self._ensure_loaded()
+        for um in self._cache.user_maps:
+            if um.gh_login == gh_login:
+                return um
+        return None

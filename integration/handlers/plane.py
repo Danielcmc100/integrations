@@ -12,6 +12,12 @@ from integration.clients.github import GitHubClient
 from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
+from integration.handlers._sync import (
+    fetch_link_by_plane,
+    parse_dt,
+    should_skip_loop,
+    strip_footer,
+)
 from integration.models import CardIssueLink, SyncSource
 
 log = structlog.get_logger()
@@ -124,6 +130,92 @@ async def handle_card_created(
     )
 
 
+async def handle_card_updated(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    github_client: GitHubClient,
+    config_service: ConfigService,
+    now_fn: Callable[[], datetime] = _utcnow,
+    plane_workspace: str | None = None,
+    plane_app_url: str | None = None,
+) -> None:
+    ws = plane_workspace if plane_workspace is not None else settings.plane_workspace
+    app_url = plane_app_url if plane_app_url is not None else settings.plane_app_url
+
+    data_raw: Any = payload.get("data")
+    data: dict[str, Any] = (
+        cast("dict[str, Any]", data_raw) if isinstance(data_raw, dict) else payload
+    )
+
+    card_id: str = str(data.get("id") or "")
+    project_id: str = str(data.get("project") or "")
+    if not card_id or not project_id:
+        log.warning("card.updated: missing id or project")
+        return
+
+    link = await fetch_link_by_plane(session, card_id)
+    if link is None:
+        log.warning("card.updated: no link found", card_id=card_id)
+        return
+
+    event_updated_at = parse_dt(str(data.get("updated_at") or "")) or now_fn()
+    if should_skip_loop(link, event_updated_at, SyncSource.plane):
+        log.info("card.updated: loop prevention skip", card_id=card_id)
+        return
+
+    gh_repo = link.gh_repo
+    issue_number = link.gh_issue_number
+    owner, repo = gh_repo.split("/", 1)
+
+    plane_card_url = (
+        f"{app_url.rstrip('/')}/{ws}/projects/{project_id}/issues/{card_id}/"
+    )
+
+    update_payload: dict[str, Any] = {}
+
+    if "name" in data:
+        update_payload["title"] = str(data["name"])
+
+    if "description_html" in data:
+        plane_desc = str(data.get("description_html") or "")
+        clean_desc = strip_footer(plane_desc)
+        update_payload["body"] = f"{clean_desc}\n\n---\nPlane: {plane_card_url}"
+
+    label_ids_raw: Any = data.get("label_ids")
+    if isinstance(label_ids_raw, list):
+        gh_labels: list[str] = []
+        for lid in cast("list[Any]", label_ids_raw):
+            lm = await config_service.get_label_map(project_id, str(lid))
+            if lm is None:
+                log.info("card.updated: unknown Plane label skipped", label_id=lid)
+            else:
+                gh_labels.append(lm.gh_label)
+        update_payload["labels"] = gh_labels
+
+    assignees_raw: Any = data.get("assignees")
+    if isinstance(assignees_raw, list):
+        gh_assignees: list[str] = []
+        for uid in cast("list[Any]", assignees_raw):
+            um = await config_service.get_user_map(str(uid))
+            if um is None:
+                log.info("card.updated: unknown Plane user skipped", user_id=uid)
+            else:
+                gh_assignees.append(um.gh_login)
+        update_payload["assignees"] = gh_assignees
+
+    if not update_payload:
+        log.debug("card.updated: no syncable fields, skipping", card_id=card_id)
+        return
+
+    await github_client.update_issue(owner, repo, issue_number, update_payload)
+    link.last_synced_at = now_fn()
+    link.sync_source_last = SyncSource.plane
+    await session.commit()
+    log.info("card.updated synced to github", card_id=card_id, issue_number=issue_number)
+
+
 async def process_plane_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -133,6 +225,14 @@ async def process_plane_event(
     async with ctx["session_factory"]() as session:
         if event_type == "card.created":
             await handle_card_created(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
+                github_client=ctx["github_client"],
+                config_service=ctx["config_service"],
+            )
+        elif event_type == "card.updated":
+            await handle_card_updated(
                 payload,
                 session=session,
                 plane_client=ctx["plane_client"],

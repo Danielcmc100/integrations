@@ -12,6 +12,13 @@ from integration.clients.github import GitHubClient
 from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
+from integration.handlers._sync import (
+    extract_gh_coords,
+    fetch_link_by_gh,
+    parse_dt,
+    should_skip_loop,
+    strip_footer,
+)
 from integration.models import CardIssueLink, SyncSource
 
 log = structlog.get_logger()
@@ -143,6 +150,158 @@ async def handle_issue_opened(
     )
 
 
+async def handle_issue_edited(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    now_fn: Callable[[], datetime] = _utcnow,
+) -> None:
+    issue, gh_repo, issue_number = extract_gh_coords(payload)
+    if not gh_repo or not issue_number:
+        return
+
+    changes_raw: Any = payload.get("changes")
+    changes: dict[str, Any] = (
+        cast("dict[str, Any]", changes_raw) if isinstance(changes_raw, dict) else {}
+    )
+    title_changed = "title" in changes
+    body_changed = "body" in changes
+    if not title_changed and not body_changed:
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.warning("issues.edited: no link found", gh_repo=gh_repo, issue_number=issue_number)
+        return
+
+    event_updated_at = parse_dt(str(issue.get("updated_at") or "")) or now_fn()
+    if should_skip_loop(link, event_updated_at, SyncSource.github):
+        log.info("issues.edited: loop prevention skip", issue_number=issue_number)
+        return
+
+    update_payload: dict[str, Any] = {}
+    if title_changed:
+        update_payload["name"] = str(issue.get("title") or "")
+    if body_changed:
+        gh_body = str(issue.get("body") or "")
+        clean_body = strip_footer(gh_body)
+        gh_issue_url = f"https://github.com/{gh_repo}/issues/{issue_number}"
+        update_payload["description_html"] = f"{clean_body}\n\n---\nGitHub: {gh_issue_url}"
+
+    await plane_client.update_card(link.plane_project_id, link.plane_card_id, update_payload)
+    link.last_synced_at = now_fn()
+    link.sync_source_last = SyncSource.github
+    await session.commit()
+    log.info("issues.edited synced to plane", gh_repo=gh_repo, issue_number=issue_number)
+
+
+async def handle_issue_labels_changed(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    config_service: ConfigService,
+    now_fn: Callable[[], datetime] = _utcnow,
+) -> None:
+    issue, gh_repo, issue_number = extract_gh_coords(payload)
+    if not gh_repo or not issue_number:
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.warning("issues.labeled: no link found", gh_repo=gh_repo, issue_number=issue_number)
+        return
+
+    event_updated_at = parse_dt(str(issue.get("updated_at") or "")) or now_fn()
+    if should_skip_loop(link, event_updated_at, SyncSource.github):
+        log.info("issues.labeled: loop prevention skip", issue_number=issue_number)
+        return
+
+    gh_labels_raw: Any = issue.get("labels")
+    plane_label_ids: list[str] = []
+    if isinstance(gh_labels_raw, list):
+        for lbl in cast("list[Any]", gh_labels_raw):
+            if isinstance(lbl, dict):
+                lbl_dict = cast("dict[str, Any]", lbl)
+                name = str(lbl_dict.get("name") or "")
+                if not name:
+                    continue
+                lm = await config_service.get_label_map_by_gh(gh_repo, name)
+                if lm is None:
+                    log.info("issues.labeled: unknown GH label skipped", label=name)
+                else:
+                    plane_label_ids.append(lm.plane_label_id)
+
+    await plane_client.update_card(
+        link.plane_project_id,
+        link.plane_card_id,
+        {"label_ids": plane_label_ids},
+    )
+    link.last_synced_at = now_fn()
+    link.sync_source_last = SyncSource.github
+    await session.commit()
+    log.info(
+        "issues.labeled synced to plane",
+        gh_repo=gh_repo,
+        issue_number=issue_number,
+        label_count=len(plane_label_ids),
+    )
+
+
+async def handle_issue_assignees_changed(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    config_service: ConfigService,
+    now_fn: Callable[[], datetime] = _utcnow,
+) -> None:
+    issue, gh_repo, issue_number = extract_gh_coords(payload)
+    if not gh_repo or not issue_number:
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.warning("issues.assigned: no link found", gh_repo=gh_repo, issue_number=issue_number)
+        return
+
+    event_updated_at = parse_dt(str(issue.get("updated_at") or "")) or now_fn()
+    if should_skip_loop(link, event_updated_at, SyncSource.github):
+        log.info("issues.assigned: loop prevention skip", issue_number=issue_number)
+        return
+
+    assignees_raw: Any = issue.get("assignees")
+    plane_assignees: list[str] = []
+    if isinstance(assignees_raw, list):
+        for a in cast("list[Any]", assignees_raw):
+            if isinstance(a, dict):
+                a_dict = cast("dict[str, Any]", a)
+                login = str(a_dict.get("login") or "")
+                if not login:
+                    continue
+                um = await config_service.get_user_map_by_gh(login)
+                if um is None:
+                    log.info("issues.assigned: unknown GH user skipped", login=login)
+                else:
+                    plane_assignees.append(um.plane_user_id)
+
+    await plane_client.update_card(
+        link.plane_project_id,
+        link.plane_card_id,
+        {"assignees": plane_assignees},
+    )
+    link.last_synced_at = now_fn()
+    link.sync_source_last = SyncSource.github
+    await session.commit()
+    log.info(
+        "issues.assigned synced to plane",
+        gh_repo=gh_repo,
+        issue_number=issue_number,
+        assignee_count=len(plane_assignees),
+    )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -150,7 +309,6 @@ async def process_github_event(
     action: str = str(payload.get("action") or "")
     event_type: str = str(ctx.get("event_type") or "")
 
-    # Determine event kind from payload structure
     if "issue" in payload and action == "opened":
         async with ctx["session_factory"]() as session:
             await handle_issue_opened(
@@ -158,6 +316,29 @@ async def process_github_event(
                 session=session,
                 plane_client=ctx["plane_client"],
                 github_client=ctx["github_client"],
+                config_service=ctx["config_service"],
+            )
+    elif "issue" in payload and action == "edited":
+        async with ctx["session_factory"]() as session:
+            await handle_issue_edited(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
+            )
+    elif "issue" in payload and action in ("labeled", "unlabeled"):
+        async with ctx["session_factory"]() as session:
+            await handle_issue_labels_changed(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
+                config_service=ctx["config_service"],
+            )
+    elif "issue" in payload and action in ("assigned", "unassigned"):
+        async with ctx["session_factory"]() as session:
+            await handle_issue_assignees_changed(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
                 config_service=ctx["config_service"],
             )
     else:
