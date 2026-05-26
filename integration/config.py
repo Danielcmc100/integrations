@@ -26,5 +26,7 @@ class Settings(BaseSettings):
     discord_bot_token: str = ""
     discord_review_channel_id: str = ""
 
+    admin_token: str = ""
+
 
 settings = Settings()

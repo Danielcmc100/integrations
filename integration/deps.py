@@ -5,6 +5,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integration.config import settings
+from integration.config_service import ConfigService
 from integration.db import SessionLocal
 from integration.queue import ArqEnqueuer, Enqueuer
 
@@ -24,5 +25,16 @@ def get_enqueuer() -> Enqueuer:
     return _enqueuer
 
 
+_config_service: ConfigService | None = None
+
+
+def get_config_service() -> ConfigService:
+    global _config_service
+    if _config_service is None:
+        _config_service = ConfigService(SessionLocal)
+    return _config_service
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 EnqueuerDep = Annotated[Enqueuer, Depends(get_enqueuer)]
+ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
