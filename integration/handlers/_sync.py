@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from integration.models import CardIssueLink, SyncSource
 
 LOOP_WINDOW_SECONDS = 5
+CONFLICT_WINDOW_SECONDS = 10
 
 _FOOTER_RE = re.compile(r"\n\n---\n(?:Plane|GitHub): [^\n]*")
 
@@ -27,6 +28,21 @@ def should_skip_loop(
         return False
     delta = abs((event_updated_at - link.last_synced_at).total_seconds())
     return delta <= LOOP_WINDOW_SECONDS
+
+
+def detect_conflict(
+    link: CardIssueLink,
+    event_updated_at: datetime,
+    source: SyncSource,
+) -> bool:
+    if link.sync_source_last == source:
+        return False
+    delta = abs((event_updated_at - link.last_synced_at).total_seconds())
+    return delta <= CONFLICT_WINDOW_SECONDS
+
+
+def event_wins_conflict(link: CardIssueLink, event_updated_at: datetime) -> bool:
+    return event_updated_at > link.last_synced_at
 
 
 def parse_dt(value: str) -> datetime | None:

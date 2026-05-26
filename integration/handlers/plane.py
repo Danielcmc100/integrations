@@ -13,6 +13,8 @@ from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
 from integration.handlers._sync import (
+    detect_conflict,
+    event_wins_conflict,
     fetch_link_by_plane,
     parse_dt,
     should_skip_loop,
@@ -23,6 +25,9 @@ from integration.models import CardIssueLink, SyncSource
 log = structlog.get_logger()
 
 BACKLOG_GROUP = "backlog"
+EM_ANDAMENTO_STATE_NAME = "Em andamento"
+IN_PROGRESS_LABEL = "in-progress"
+DONE_CANCEL_GROUPS = frozenset({"completed", "cancelled"})
 
 
 def _utcnow() -> datetime:
@@ -172,6 +177,46 @@ async def handle_card_updated(
     plane_card_url = (
         f"{app_url.rstrip('/')}/{ws}/projects/{project_id}/issues/{card_id}/"
     )
+
+    # --- State transition sync (US-010) ---
+    state_detail_raw: Any = data.get("state_detail")
+    if isinstance(state_detail_raw, dict):
+        sd = cast("dict[str, Any]", state_detail_raw)
+        state_group = str(sd.get("group") or "")
+        state_name_val = str(sd.get("name") or "")
+
+        skip_state = False
+        if detect_conflict(link, event_updated_at, SyncSource.plane):
+            log.warning(
+                "card.updated: state conflict detected",
+                card_id=card_id,
+                last_synced_at=link.last_synced_at,
+                event_updated_at=event_updated_at,
+            )
+            if not event_wins_conflict(link, event_updated_at):
+                skip_state = True
+
+        if not skip_state:
+            if state_group in DONE_CANCEL_GROUPS:
+                await github_client.close_issue(owner, repo, issue_number)
+                link.last_synced_at = now_fn()
+                link.sync_source_last = SyncSource.plane
+                await session.commit()
+                log.info(
+                    "card.updated: state Done/Cancelled -> GH issue closed",
+                    card_id=card_id,
+                    state_group=state_group,
+                )
+                return
+            elif state_name_val == EM_ANDAMENTO_STATE_NAME:
+                await github_client.add_labels(owner, repo, issue_number, [IN_PROGRESS_LABEL])
+                link.last_synced_at = now_fn()
+                link.sync_source_last = SyncSource.plane
+                await session.commit()
+                log.info(
+                    "card.updated: Em andamento -> in-progress label added",
+                    card_id=card_id,
+                )
 
     update_payload: dict[str, Any] = {}
 

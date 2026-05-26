@@ -13,6 +13,8 @@ from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
 from integration.handlers._sync import (
+    detect_conflict,
+    event_wins_conflict,
     extract_gh_coords,
     fetch_link_by_gh,
     parse_dt,
@@ -26,6 +28,8 @@ log = structlog.get_logger()
 REFINAMENTO_STATE_NAME = "Refinamento"
 DEFAULT_LABEL_NAME = "Feature"
 DEFAULT_PRIORITY = "medium"
+DONE_STATE_GROUP = "completed"
+CLOSED_BY_PR_REASON = "completed_by_pull_request"
 
 
 def _utcnow() -> datetime:
@@ -302,6 +306,76 @@ async def handle_issue_assignees_changed(
     )
 
 
+async def handle_issue_closed(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    now_fn: Callable[[], datetime] = _utcnow,
+) -> None:
+    issue, gh_repo, issue_number = extract_gh_coords(payload)
+    if not gh_repo or not issue_number:
+        return
+
+    state_reason = str(issue.get("state_reason") or "")
+    if state_reason == CLOSED_BY_PR_REASON:
+        log.info("issues.closed: skipped, closed by PR", issue_number=issue_number)
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.warning("issues.closed: no link found", gh_repo=gh_repo, issue_number=issue_number)
+        return
+
+    event_updated_at = parse_dt(str(issue.get("updated_at") or "")) or now_fn()
+    if should_skip_loop(link, event_updated_at, SyncSource.github):
+        log.info("issues.closed: loop prevention skip", issue_number=issue_number)
+        return
+
+    if detect_conflict(link, event_updated_at, SyncSource.github):
+        log.warning(
+            "issues.closed: state conflict detected",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+            last_synced_at=link.last_synced_at,
+            event_updated_at=event_updated_at,
+        )
+        if not event_wins_conflict(link, event_updated_at):
+            log.info(
+                "issues.closed: conflict resolved, plane side newer, skip",
+                issue_number=issue_number,
+            )
+            return
+
+    states = await plane_client.list_states(link.plane_project_id)
+    done_state_id: str | None = None
+    for s in states:
+        if str(s.get("group") or "") == DONE_STATE_GROUP:
+            done_state_id = str(s["id"])
+            break
+
+    if done_state_id is None:
+        log.warning(
+            "issues.closed: no completed state in Plane",
+            project_id=link.plane_project_id,
+        )
+        return
+
+    await plane_client.update_card(
+        link.plane_project_id,
+        link.plane_card_id,
+        {"state": done_state_id},
+    )
+    link.last_synced_at = now_fn()
+    link.sync_source_last = SyncSource.github
+    await session.commit()
+    log.info(
+        "issues.closed -> plane card moved to Done",
+        gh_repo=gh_repo,
+        issue_number=issue_number,
+    )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -340,6 +414,13 @@ async def process_github_event(
                 session=session,
                 plane_client=ctx["plane_client"],
                 config_service=ctx["config_service"],
+            )
+    elif "issue" in payload and action == "closed":
+        async with ctx["session_factory"]() as session:
+            await handle_issue_closed(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
             )
     else:
         log.debug(

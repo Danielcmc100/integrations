@@ -158,6 +158,19 @@ class GitHubClient:
         )
         return _as_json_dict(response)
 
+    async def add_labels(
+        self, owner: str, repo: str, number: int, labels: list[str]
+    ) -> list[JsonDict]:
+        response = await self._request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/{number}/labels",
+            json={"labels": labels},
+        )
+        raw: Any = response.json()
+        if not isinstance(raw, list):
+            raise ValueError("expected array from add_labels")
+        return [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
+
     async def get_pr(self, owner: str, repo: str, number: int) -> JsonDict:
         response = await self._request("GET", f"/repos/{owner}/{repo}/pulls/{number}")
         return _as_json_dict(response)
