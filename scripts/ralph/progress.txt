@@ -46,3 +46,13 @@ notes: Shared _sync.py helpers: strip_footer, should_skip_loop (5s+source), pars
 files: integration/config.py, integration/webhooks.py, integration/handlers/__init__.py, integration/handlers/plane.py, integration/worker.py, tests/test_handler_plane_card_created.py
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 46 passed (5 new handler tests + 41 existing)
 notes: ARQ task process_plane_event dispatches card.created to handle_card_created. Backlog (state_detail.group=backlog) skipped with structlog info. Missing module or no repo_module_map entry skips with warning. Creates GH issue (title=card.name, body=description+Plane footer), updates Plane card description_html with GitHub footer, writes CardIssueLink with sync_source_last=plane and last_synced_at=now(). Added plane_app_url to Settings. Updated webhooks.py to pass raw body as second ARQ arg (existing webhook tests unchanged). Added ARQ WorkerSettings in integration/worker.py.
+
+2026-05-26 US-011 PASS
+files: integration/config.py, integration/handlers/github.py, tests/test_handler_comment_sync.py
+checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 85 passed (4 new)
+notes: Handler issue_comment.created -> Plane add_comment prefixed '[GitHub @<login>]: '. Bot skip via github_bot_login setting. No link -> warning+skip. Dispatcher updated. Plane->GH not implemented per story.
+
+2026-05-26 US-010 PASS
+files: integration/handlers/_sync.py, integration/handlers/plane.py, integration/handlers/github.py, integration/clients/github.py, tests/test_handler_state_sync.py
+checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 81 passed (12 new)
+notes: Plane Done/Cancelled -> close GH issue; Plane Em andamento -> add in-progress label; GH issues.closed (not by PR) -> move Plane card to Done. detect_conflict (10s + opposite source) + event_wins_conflict (last-write-wins) added to _sync.py. GitHubClient.add_labels (POST /labels) added. Dispatcher updated for issues.closed.

@@ -376,6 +376,66 @@ async def handle_issue_closed(
     )
 
 
+async def handle_issue_comment_created(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    github_bot_login: str | None = None,
+) -> None:
+    comment_raw: Any = payload.get("comment")
+    comment: dict[str, Any] = (
+        cast("dict[str, Any]", comment_raw) if isinstance(comment_raw, dict) else {}
+    )
+
+    user_raw: Any = comment.get("user")
+    user: dict[str, Any] = (
+        cast("dict[str, Any]", user_raw) if isinstance(user_raw, dict) else {}
+    )
+    login: str = str(user.get("login") or "")
+
+    bot_login = github_bot_login if github_bot_login is not None else settings.github_bot_login
+    if bot_login and login == bot_login:
+        log.info("issue_comment.created: skip bot comment", login=login)
+        return
+
+    issue_raw: Any = payload.get("issue")
+    issue: dict[str, Any] = (
+        cast("dict[str, Any]", issue_raw) if isinstance(issue_raw, dict) else {}
+    )
+    repo_raw: Any = payload.get("repository")
+    repo: dict[str, Any] = (
+        cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    )
+    gh_repo: str = str(repo.get("full_name") or "")
+    issue_number: int = int(issue.get("number") or 0)
+
+    if not gh_repo or not issue_number:
+        log.warning("issue_comment.created: missing repo or issue number")
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.warning(
+            "issue_comment.created: no link found",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+        )
+        return
+
+    comment_body: str = str(comment.get("body") or "")
+    prefix = f"[GitHub @{login}]: " if login else "[GitHub]: "
+    await plane_client.add_comment(
+        link.plane_project_id, link.plane_card_id, f"{prefix}{comment_body}"
+    )
+    log.info(
+        "issue_comment.created synced to plane",
+        gh_repo=gh_repo,
+        issue_number=issue_number,
+        login=login,
+    )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -418,6 +478,13 @@ async def process_github_event(
     elif "issue" in payload and action == "closed":
         async with ctx["session_factory"]() as session:
             await handle_issue_closed(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
+            )
+    elif "comment" in payload and action == "created":
+        async with ctx["session_factory"]() as session:
+            await handle_issue_comment_created(
                 payload,
                 session=session,
                 plane_client=ctx["plane_client"],

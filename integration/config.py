@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     github_api_base_url: str = "https://api.github.com"
 
     plane_app_url: str = "https://app.plane.so"
+    github_bot_login: str = ""
 
 
 settings = Settings()

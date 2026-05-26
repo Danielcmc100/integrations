@@ -172,8 +172,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Plane Done/Cancelled -> github_client.close_issue in handle_card_updated (state_detail.group in completed|cancelled). Plane Em andamento -> github_client.add_labels(['in-progress']) (new GitHubClient.add_labels via POST /labels). GH issues.closed -> handle_issue_closed: skips state_reason='completed_by_pull_request', resolves Plane state with group='completed' via list_states, calls update_card. Conflict: detect_conflict (10s window, opposite source) + event_wins_conflict (last-write-wins by updated_at) in _sync.py. Loop prevention honored via should_skip_loop (5s, same source). basedpyright: 0 errors; ruff: 0 errors; pytest: 81 passed (12 new)."
     },
     {
       "id": "US-011",
@@ -188,8 +188,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "handle_issue_comment_created in integration/handlers/github.py. Skips if login matches github_bot_login setting (injectable for tests). Fetches link by gh_repo+issue_number; missing link logs warning and returns. Posts Plane comment prefixed '[GitHub @<login>]: '. Plane->GH not implemented. github_bot_login added to Settings. process_github_event dispatcher routes 'comment' in payload + action=='created'. 4 new tests; 85 total passing. basedpyright: 0 errors; ruff: 0 errors."
     },
     {
       "id": "US-012",
