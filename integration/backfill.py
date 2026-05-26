@@ -39,7 +39,7 @@ def _footer_linked(
     return gh_url in desc or card_url in body
 
 
-async def _backfill(
+async def backfill(
     *,
     project_id: str,
     gh_repo: str,
@@ -217,7 +217,7 @@ async def _run(*, project_id: str, gh_repo: str, create_missing: bool) -> None:
     )
     try:
         async with SessionLocal() as session:
-            await _backfill(
+            await backfill(
                 project_id=project_id,
                 gh_repo=gh_repo,
                 create_missing=create_missing,

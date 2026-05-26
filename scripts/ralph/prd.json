@@ -357,8 +357,8 @@
         "Typecheck passes"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": ".github/workflows/ci.yml: triggers on pull_request; postgres:16-alpine and redis:7-alpine services with health checks; steps: checkout, setup-python 3.12, astral-sh/setup-uv, uv sync --all-groups, ruff check, basedpyright, pytest with DATABASE_URL+REDIS_URL env vars. Also fixed pre-existing ruff/pyright errors across test_backfill.py, test_admin.py, test_reminder_cron.py and renamed _backfill->backfill, _insert_dead_letter->insert_dead_letter for public API cleanliness. basedpyright: 0 errors; ruff: 0 errors; pytest: 194 passed."
     }
   ]
 }

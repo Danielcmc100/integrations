@@ -6,9 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-from integration.backfill import _backfill
+from integration.backfill import backfill
 from integration.models import CardIssueLink, SyncSource
 
 
@@ -33,7 +31,7 @@ class FakeResult:
 
 class FakeSession:
     def __init__(self, existing_links: dict[str, CardIssueLink] | None = None) -> None:
-        self._links: dict[str, CardIssueLink] = existing_links or {}
+        self.links: dict[str, CardIssueLink] = existing_links or {}
         self.added: list[Any] = []
         self.commit_count: int = 0
 
@@ -50,7 +48,7 @@ class FakeSession:
         # Instead, we return None by default and let tests inject via _current_card_id.
         card_id = getattr(self, "_current_card_id", None)
         if card_id is not None:
-            return FakeResult(self._links.get(card_id))
+            return FakeResult(self.links.get(card_id))
         return FakeResult(None)
 
 
@@ -121,18 +119,15 @@ async def _run_backfill(
 
     # Patch fetch_link_by_plane to use our FakeSession._current_card_id trick
     # by monkey-patching the module-level function used in _backfill
-    original_execute = session.execute
-
     async def smart_execute(stmt: Any) -> FakeResult:
         # Extract card_id from the WHERE clause comparison value
         try:
-            from sqlalchemy import inspect as sa_inspect
 
             compiled = stmt.compile()
             params: dict[str, Any] = dict(compiled.params)
             for val in params.values():
-                if isinstance(val, str) and val in session._links:
-                    return FakeResult(session._links[val])
+                if isinstance(val, str) and val in session.links:
+                    return FakeResult(session.links[val])
             # If no match in links, return None
             return FakeResult(None)
         except Exception:
@@ -140,11 +135,11 @@ async def _run_backfill(
 
     session.execute = smart_execute  # type: ignore[method-assign]
 
-    await _backfill(
+    await backfill(
         project_id=PROJECT_ID,
         gh_repo=GH_REPO,
         create_missing=create_missing,
-        session=session,
+        session=session,  # type: ignore[arg-type]
         plane_client=plane_client,
         github_client=github_client,
         app_url=APP_URL,
@@ -214,7 +209,7 @@ def test_unmatched_issue_no_link_created_without_flag() -> None:
     issue = _make_issue(number=11, title="My Card")
     extra_issue = _make_issue(number=12, title="Extra Unmatched Issue")
 
-    session, plane_client, github_client = _run(
+    session, plane_client, _github_client = _run(
         _run_backfill(
             cards=[card],
             issues=[issue, extra_issue],
@@ -304,7 +299,7 @@ def test_create_missing_gh_issue_creates_plane_card() -> None:
 def test_create_missing_gh_issue_no_refinamento_state() -> None:
     issue = _make_issue(number=31, title="Issue No State")
 
-    session, plane_client, _ = _run(
+    _session, plane_client, _ = _run(
         _run_backfill(cards=[], issues=[issue], create_missing=True, states=[])
     )
 

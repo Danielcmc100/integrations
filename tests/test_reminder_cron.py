@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Coroutine, Iterator
+from collections.abc import AsyncGenerator, Coroutine, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -67,7 +67,7 @@ class FakeSession:
 
 
 @contextlib.asynccontextmanager
-async def _session_ctx(session: FakeSession) -> AsyncIterator[FakeSession]:
+async def _session_ctx(session: FakeSession) -> AsyncGenerator[FakeSession, None]:
     yield session
 
 

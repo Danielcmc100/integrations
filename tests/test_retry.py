@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncGenerator, Coroutine
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from integration.models import DeadLetter
-from integration.retry import DeadLetteredError, _insert_dead_letter, run_with_retry
+from integration.retry import DeadLetteredError, insert_dead_letter, run_with_retry
 
 
 def _run(coro: Coroutine[Any, Any, Any]) -> Any:
@@ -36,7 +36,7 @@ class FakeSession:
 
 
 @contextlib.asynccontextmanager
-async def _session_ctx(session: FakeSession) -> AsyncIterator[FakeSession]:
+async def _session_ctx(session: FakeSession) -> AsyncGenerator[FakeSession, None]:
     yield session
 
 
@@ -202,7 +202,7 @@ def test_max_retries_exhausted_raises_dead_lettered(monkeypatch: pytest.MonkeyPa
 
     import integration.retry as retry_mod
 
-    monkeypatch.setattr(retry_mod, "_insert_dead_letter", fake_insert)
+    monkeypatch.setattr(retry_mod, "insert_dead_letter", fake_insert)
 
     with pytest.raises(DeadLetteredError):
         _run(
@@ -224,14 +224,20 @@ def test_max_retries_exhausted_raises_dead_lettered(monkeypatch: pytest.MonkeyPa
     assert inserted[0][1] == "card.updated"
 
 
-def test_dead_lettered_error_propagates_without_re_insert() -> None:
+def test_dead_lettered_error_propagates_without_re_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     inserted: list[int] = []
 
     async def fn() -> None:
         raise DeadLetteredError("already dead")
 
+    import integration.retry as retry_mod
+
     async def fake_insert(*args: Any, **kwargs: Any) -> None:
         inserted.append(1)
+
+    monkeypatch.setattr(retry_mod, "insert_dead_letter", fake_insert)
 
     with pytest.raises(DeadLetteredError):
         _run(
@@ -248,7 +254,7 @@ def test_dead_lettered_error_propagates_without_re_insert() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _insert_dead_letter tests
+# insert_dead_letter tests
 # ---------------------------------------------------------------------------
 
 
@@ -257,7 +263,7 @@ def test_insert_dead_letter_writes_row() -> None:
     ctx = _make_ctx(session=session)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="plane",
             event_type="card.created",
@@ -281,7 +287,7 @@ def test_insert_dead_letter_writes_row() -> None:
 def test_insert_dead_letter_no_session_factory_no_crash() -> None:
     ctx: dict[str, Any] = {}
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="github",
             event_type="issues.opened",
@@ -305,7 +311,7 @@ def test_insert_dead_letter_posts_discord_message(
     ctx = _make_ctx(session=session, discord_bot=discord_bot)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="plane",
             event_type="card.created",
@@ -332,7 +338,7 @@ def test_insert_dead_letter_no_discord_bot_no_crash(
     ctx = _make_ctx(session=session)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="plane",
             event_type="card.created",
@@ -358,7 +364,7 @@ def test_insert_dead_letter_no_ops_channel_skips_discord(
     ctx = _make_ctx(session=session, discord_bot=discord_bot)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="github",
             event_type="issues.opened",
@@ -384,7 +390,7 @@ def test_insert_dead_letter_truncates_long_error(
     ctx = _make_ctx(discord_bot=discord_bot)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="plane",
             event_type="card.updated",
@@ -412,7 +418,7 @@ def test_insert_dead_letter_discord_failure_does_not_crash(
     ctx = _make_ctx(session=session, discord_bot=discord_bot)
 
     _run(
-        _insert_dead_letter(
+        insert_dead_letter(
             ctx,
             source="plane",
             event_type="card.created",

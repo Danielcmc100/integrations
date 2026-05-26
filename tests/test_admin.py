@@ -45,7 +45,7 @@ class FakeSession:
     async def commit(self) -> None:
         self.commits += 1
         for obj in self.added:
-            if hasattr(type(obj), "id") and getattr(obj, "id", None) is None:
+            if hasattr(type(obj), "id") and getattr(obj, "id", None) is None:  # pyright: ignore[reportUnknownArgumentType]
                 obj.id = 1
 
 

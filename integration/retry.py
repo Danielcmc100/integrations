@@ -27,7 +27,7 @@ def _is_transient(exc: BaseException) -> bool:
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
 
 
-async def _insert_dead_letter(
+async def insert_dead_letter(
     ctx: dict[str, Any],
     source: str,
     event_type: str,
@@ -105,7 +105,7 @@ async def run_with_retry(
             if attempt < MAX_RETRIES:
                 await sleep_fn(BACKOFF_SECONDS[attempt])
             else:
-                await _insert_dead_letter(ctx, source, event_type, payload_json, last_error)
+                await insert_dead_letter(ctx, source, event_type, payload_json, last_error)
                 raise DeadLetteredError(
                     f"dead-lettered after {MAX_RETRIES} retries: {last_error}"
                 ) from exc
