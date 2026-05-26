@@ -22,6 +22,12 @@ class DiscordBotProtocol(Protocol):
         view: discord.ui.View | None = None,
     ) -> str: ...
 
+    async def create_thread(self, message_id: str, channel_id: str, name: str) -> str: ...
+
+    async def post_thread_message(self, thread_id: str, content: str) -> None: ...
+
+    async def archive_thread(self, thread_id: str) -> None: ...
+
 
 class DiscordBot:
     def __init__(self, token: str) -> None:
@@ -48,6 +54,15 @@ class DiscordBot:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
 
+    async def _get_text_channel(self, channel_id: str) -> discord.TextChannel:
+        ch = self._client.get_channel(int(channel_id))
+        if not isinstance(ch, discord.TextChannel):
+            raw: Any = await self._client.fetch_channel(int(channel_id))
+            if not isinstance(raw, discord.TextChannel):
+                raise RuntimeError(f"channel {channel_id!r} is not a TextChannel")
+            ch = raw
+        return ch
+
     async def post_review_message(
         self,
         channel_id: str,
@@ -56,14 +71,30 @@ class DiscordBot:
         view: discord.ui.View | None = None,
     ) -> str:
         await self._ready_event.wait()
-        ch = self._client.get_channel(int(channel_id))
-        if not isinstance(ch, discord.TextChannel):
-            raw: Any = await self._client.fetch_channel(int(channel_id))
-            if not isinstance(raw, discord.TextChannel):
-                raise RuntimeError(f"channel {channel_id!r} is not a TextChannel")
-            ch = raw
+        ch = await self._get_text_channel(channel_id)
         if view is not None:
             msg = await ch.send(embed=embed, view=view)
         else:
             msg = await ch.send(embed=embed)
         return str(msg.id)
+
+    async def create_thread(self, message_id: str, channel_id: str, name: str) -> str:
+        await self._ready_event.wait()
+        ch = await self._get_text_channel(channel_id)
+        msg = await ch.fetch_message(int(message_id))
+        thread = await msg.create_thread(name=name)
+        return str(thread.id)
+
+    async def post_thread_message(self, thread_id: str, content: str) -> None:
+        await self._ready_event.wait()
+        raw: Any = await self._client.fetch_channel(int(thread_id))
+        if not isinstance(raw, discord.Thread):
+            raise RuntimeError(f"channel {thread_id!r} is not a Thread")
+        await raw.send(content)
+
+    async def archive_thread(self, thread_id: str) -> None:
+        await self._ready_event.wait()
+        raw: Any = await self._client.fetch_channel(int(thread_id))
+        if not isinstance(raw, discord.Thread):
+            raise RuntimeError(f"channel {thread_id!r} is not a Thread")
+        await raw.edit(archived=True)

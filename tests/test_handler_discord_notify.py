@@ -22,6 +22,7 @@ PR_NUMBER = 10
 PR_NODE_ID = "PR_kwDOABCDEF"
 DISCORD_CHANNEL_ID = "111222333"
 DISCORD_MSG_ID = "999888777"
+DISCORD_THREAD_ID = "444555666"
 
 
 class FakeResult:
@@ -105,9 +106,15 @@ def _make_payload(pr: dict[str, Any], action: str = "opened") -> dict[str, Any]:
     }
 
 
-def _make_discord_bot(message_id: str = DISCORD_MSG_ID) -> MagicMock:
+def _make_discord_bot(
+    message_id: str = DISCORD_MSG_ID,
+    thread_id: str = DISCORD_THREAD_ID,
+) -> MagicMock:
     bot = MagicMock()
     bot.post_review_message = AsyncMock(return_value=message_id)
+    bot.create_thread = AsyncMock(return_value=thread_id)
+    bot.post_thread_message = AsyncMock()
+    bot.archive_thread = AsyncMock()
     return bot
 
 

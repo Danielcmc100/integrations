@@ -675,13 +675,19 @@ async def _check_and_notify(
         discord_channel_id, embed, view=view
     )
 
+    title = str(pr.get("title") or "")
+    thread_name = f"PR #{state.pr_number} - {title[:80]}"
+    thread_id = await discord_bot.create_thread(message_id, discord_channel_id, thread_name)
+
     state.ready_notified_at = now_fn()
     state.discord_message_id = message_id
+    state.discord_thread_id = thread_id
     await session.commit()
     log.info(
         "pr_ready: discord notification sent",
         pr_number=state.pr_number,
         message_id=message_id,
+        thread_id=thread_id,
     )
 
 
@@ -803,6 +809,86 @@ async def handle_check_suite_completed(
         )
 
 
+async def _fetch_pr_state(
+    session: AsyncSession, pr_node_id: str
+) -> PrNotificationState | None:
+    result = await session.execute(
+        select(PrNotificationState).where(PrNotificationState.pr_node_id == pr_node_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def handle_pr_review_submitted(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    discord_bot: DiscordBotProtocol,
+) -> None:
+    review_raw: Any = payload.get("review")
+    review: dict[str, Any] = (
+        cast("dict[str, Any]", review_raw) if isinstance(review_raw, dict) else {}
+    )
+    pr_raw: Any = payload.get("pull_request")
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw) if isinstance(pr_raw, dict) else {}
+
+    pr_node_id = str(pr.get("node_id") or "")
+    if not pr_node_id:
+        log.warning("pr_review_submitted: missing pr node_id")
+        return
+
+    state = await _fetch_pr_state(session, pr_node_id)
+    if state is None or state.discord_thread_id is None:
+        log.info("pr_review_submitted: no discord thread", pr_node_id=pr_node_id)
+        return
+
+    user_raw: Any = review.get("user") or {}
+    user: dict[str, Any] = cast("dict[str, Any]", user_raw) if isinstance(user_raw, dict) else {}
+    reviewer_login = str(user.get("login") or "")
+    review_state = str(review.get("state") or "")
+    body = str(review.get("body") or "")[:200]
+
+    content = f"{review_state} by @{reviewer_login}"
+    if body:
+        content += f": {body}"
+
+    await discord_bot.post_thread_message(state.discord_thread_id, content)
+    log.info("pr_review_submitted: posted to thread", pr_number=state.pr_number)
+
+
+async def handle_pr_closed_discord(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    discord_bot: DiscordBotProtocol,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw) if isinstance(pr_raw, dict) else {}
+
+    pr_node_id = str(pr.get("node_id") or "")
+    if not pr_node_id:
+        log.warning("pr_closed_discord: missing pr node_id")
+        return
+
+    state = await _fetch_pr_state(session, pr_node_id)
+    if state is None or state.discord_thread_id is None:
+        log.info("pr_closed_discord: no discord thread", pr_node_id=pr_node_id)
+        return
+
+    merged = bool(pr.get("merged"))
+    pr_number = int(pr.get("number") or 0)
+    status = "merged" if merged else "closed"
+    html_url = str(pr.get("html_url") or "")
+
+    content = f"PR #{pr_number} {status}."
+    if html_url:
+        content += f" {html_url}"
+
+    thread_id = state.discord_thread_id
+    await discord_bot.post_thread_message(thread_id, content)
+    await discord_bot.archive_thread(thread_id)
+    log.info("pr_closed_discord: thread archived", pr_number=pr_number, thread_id=thread_id)
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -890,6 +976,15 @@ async def process_github_event(
                     discord_bot=_db,
                     discord_channel_id=settings.discord_review_channel_id,
                 )
+    elif "review" in payload and action == "submitted":
+        _db = ctx.get("discord_bot")
+        if _db is not None:
+            async with ctx["session_factory"]() as session:
+                await handle_pr_review_submitted(
+                    payload,
+                    session=session,
+                    discord_bot=_db,
+                )
     elif "pull_request" in payload and action == "closed":
         async with ctx["session_factory"]() as session:
             await handle_pr_merged(
@@ -898,6 +993,14 @@ async def process_github_event(
                 plane_client=ctx["plane_client"],
                 config_service=ctx["config_service"],
             )
+        _db = ctx.get("discord_bot")
+        if _db is not None:
+            async with ctx["session_factory"]() as session:
+                await handle_pr_closed_discord(
+                    payload,
+                    session=session,
+                    discord_bot=_db,
+                )
     else:
         log.debug(
             "process_github_event: unhandled event",
