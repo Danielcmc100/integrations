@@ -32,6 +32,7 @@ from integration.handlers._sync import (
 from integration.metrics import sync_actions_total, sync_duration_seconds
 from integration.models import CardIssueLink, PrNotificationState, SyncSource
 from integration.pr_ready import compute_ready
+from integration.retry import DeadLetteredError, run_with_retry
 
 log = structlog.get_logger()
 
@@ -913,9 +914,7 @@ async def process_github_event(
     action: str = str(payload.get("action") or "")
     event_type: str = _gh_event_label(payload)
 
-    start = time.perf_counter()
-    outcome = "success"
-    try:
+    async def _dispatch() -> None:
         if "issue" in payload and action == "opened":
             async with ctx["session_factory"]() as session:
                 await handle_issue_opened(
@@ -1028,6 +1027,19 @@ async def process_github_event(
                 event_type=event_type,
                 log_id=log_id,
             )
+
+    start = time.perf_counter()
+    outcome = "success"
+    try:
+        await run_with_retry(
+            _dispatch,
+            ctx=ctx,
+            source="github",
+            event_type=event_type,
+            payload_json=payload_json,
+        )
+    except DeadLetteredError:
+        outcome = "dead_lettered"
     except Exception:
         outcome = "error"
         raise

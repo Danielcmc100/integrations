@@ -96,6 +96,21 @@ class PrNotificationState(Base):
     )
 
 
+class DeadLetter(Base):
+    __tablename__ = "dead_letter"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[str] = mapped_column(String, nullable=False)
+    last_error: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class WebhookEventLog(Base):
     __tablename__ = "webhook_event_log"
 

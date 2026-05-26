@@ -23,6 +23,7 @@ from integration.handlers._sync import (
 )
 from integration.metrics import sync_actions_total, sync_duration_seconds
 from integration.models import CardIssueLink, SyncSource
+from integration.retry import DeadLetteredError, run_with_retry
 
 log = structlog.get_logger()
 
@@ -269,9 +270,7 @@ async def process_plane_event(
     payload: dict[str, Any] = json.loads(payload_json)
     event_type: str = str(payload.get("event") or "")
 
-    start = time.perf_counter()
-    outcome = "success"
-    try:
+    async def _dispatch() -> None:
         async with ctx["session_factory"]() as session:
             if event_type == "card.created":
                 await handle_card_created(
@@ -295,6 +294,19 @@ async def process_plane_event(
                     event_type=event_type,
                     log_id=log_id,
                 )
+
+    start = time.perf_counter()
+    outcome = "success"
+    try:
+        await run_with_retry(
+            _dispatch,
+            ctx=ctx,
+            source="plane",
+            event_type=event_type,
+            payload_json=payload_json,
+        )
+    except DeadLetteredError:
+        outcome = "dead_lettered"
     except Exception:
         outcome = "error"
         raise

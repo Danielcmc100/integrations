@@ -28,6 +28,8 @@ class DiscordBotProtocol(Protocol):
 
     async def archive_thread(self, thread_id: str) -> None: ...
 
+    async def post_message(self, channel_id: str, content: str) -> None: ...
+
 
 class DiscordBot:
     def __init__(self, token: str) -> None:
@@ -98,3 +100,8 @@ class DiscordBot:
         if not isinstance(raw, discord.Thread):
             raise RuntimeError(f"channel {thread_id!r} is not a Thread")
         await raw.edit(archived=True)
+
+    async def post_message(self, channel_id: str, content: str) -> None:
+        await self._ready_event.wait()
+        ch = await self._get_text_channel(channel_id)
+        await ch.send(content)

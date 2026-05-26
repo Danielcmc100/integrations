@@ -96,3 +96,8 @@ notes: structlog JSON config in configure_logging() called at startup. Custom RE
 files: integration/backfill.py (new), integration/clients/plane.py, integration/clients/github.py, tests/test_backfill.py (new)
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 173 passed (10 new)
 notes: CLI python -m integration.backfill --project <id> --repo <owner/repo> [--create-missing]. list_cards added to PlaneClient; list_issues (paginated, page=1..N until batch<100) added to GitHubClient. Matching: title first, then footer cross-reference (Plane URL in GH body or GH URL in card desc). Idempotent via fetch_link_by_plane skip. Without --create-missing: reports unmatched only. With --create-missing: Plane card -> GH issue + update card desc + link (sync_source_last=plane); GH issue -> Plane card (Refinamento state, priority=medium) + update GH body + link (sync_source_last=github).
+
+2026-05-26 US-020 PASS
+files: integration/retry.py, integration/models.py, integration/config.py, integration/discord_bot.py, alembic/versions/7c3987160332_add_dead_letter.py, tests/test_retry.py
+checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 194 passed (13 new)
+notes: run_with_retry retries transient errors (httpx.TransportError + 5xx) up to 5 times with backoff (1,2,4,8,16s); non-transient raises immediately; after 5 failures inserts DeadLetter row and raises DeadLetteredError. _insert_dead_letter posts Discord message to discord_ops_channel_id; skips if no bot/no channel; discord failure swallowed. Alembic migration verified upgrade/downgrade/upgrade. process_plane_event + process_github_event both wrapped with run_with_retry.

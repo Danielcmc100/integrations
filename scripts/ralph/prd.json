@@ -342,8 +342,8 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "run_with_retry in integration/retry.py: retries on httpx.TransportError and 5xx up to MAX_RETRIES=5 with BACKOFF_SECONDS=(1,2,4,8,16); non-transient errors propagate immediately; DeadLetteredError propagates without re-insert. _insert_dead_letter: inserts DeadLetter row (uuid PK, source, event_type, payload, last_error, created_at UTC), posts Discord message to discord_ops_channel_id via discord_bot.post_message with truncated summary; skips if no bot or no channel; discord failure logged+swallowed. DeadLetter model in models.py. Alembic migration 7c3987160332_add_dead_letter.py verified upgrade/downgrade/upgrade cycle. discord_ops_channel_id added to Settings. process_plane_event and process_github_event both use run_with_retry. basedpyright: 0 errors; ruff: 0 errors; pytest: 194 passed (13 new)."
     },
     {
       "id": "US-021",
