@@ -118,8 +118,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "ARQ task process_plane_event dispatches card.created to handle_card_created. Backlog (state_detail.group=backlog) skipped. Module resolved via ConfigService; missing module or no repo map skips. Creates GH issue with description+Plane footer, updates Plane card description with GitHub footer, writes CardIssueLink (sync_source_last=plane, last_synced_at=now). webhooks.py updated to pass raw body JSON as second arg to both ARQ enqueue calls. plane_app_url added to Settings. basedpyright: 0 errors; ruff: 0 errors; pytest: 46 passed."
     },
     {
       "id": "US-008",

@@ -65,7 +65,7 @@ async def github_webhook(
     )
     session.add(log)
     await session.commit()
-    await enqueuer.enqueue("process_github_event", str(log_id))
+    await enqueuer.enqueue("process_github_event", str(log_id), body.decode())
     return {"status": "accepted"}
 
 
@@ -104,5 +104,5 @@ async def plane_webhook(
     )
     session.add(log)
     await session.commit()
-    await enqueuer.enqueue("process_plane_event", str(log_id))
+    await enqueuer.enqueue("process_plane_event", str(log_id), body.decode())
     return {"status": "accepted"}
