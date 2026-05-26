@@ -79,6 +79,20 @@ class UserMap(Base):
     discord_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class PrNotificationState(Base):
+    __tablename__ = "pr_notification_state"
+
+    pr_node_id: Mapped[str] = mapped_column(String, primary_key=True)
+    gh_repo: Mapped[str] = mapped_column(String, nullable=False)
+    pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    ready_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_ready_cycle_id: Mapped[str] = mapped_column(String, nullable=False, default="")
+    discord_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    discord_thread_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class WebhookEventLog(Base):
     __tablename__ = "webhook_event_log"
 
