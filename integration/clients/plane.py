@@ -117,6 +117,10 @@ class PlaneClient:
         items = _as_json_list(response)
         return items[0] if items else None
 
+    async def list_cards(self, project_id: str) -> list[JsonDict]:
+        response = await self._request("GET", f"{self._ws_prefix(project_id)}/issues/")
+        return _as_json_list(response)
+
 
 def _parse_retry_after(value: str | None) -> float:
     return _safe_float(value, 1.0)

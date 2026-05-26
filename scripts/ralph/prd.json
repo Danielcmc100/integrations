@@ -292,8 +292,8 @@
         "Tests pass"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "GET/POST/PUT/DELETE under /admin/repo-modules, /admin/labels, /admin/users. Auth via Authorization: Bearer <admin_token> header; 401 on mismatch or empty token. Successful writes invalidate ConfigService cache. Pydantic schemas validate input; 422 on bad payload. admin_token added to Settings. get_config_service() singleton dep added to deps.py. ConfigServiceDep exported. 22 new tests; 163 total passing. basedpyright: 0 errors; ruff: 0 errors."
     },
     {
       "id": "US-018",
@@ -309,8 +309,8 @@
         "Tests pass"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "integration/backfill.py implements CLI: --project, --repo, --create-missing. list_cards added to PlaneClient; list_issues (paginated) added to GitHubClient. Matching: title first, then footer cross-reference (Plane URL in GH body or GH URL in card desc). Idempotent: fetch_link_by_plane skip. Without --create-missing: reports unmatched cards/issues, creates nothing. With --create-missing: Plane card -> create GH issue + update Plane card desc + write link (sync_source_last=plane); GH issue -> create Plane card (Refinamento state if found, priority=medium) + update GH issue body + write link (sync_source_last=github). basedpyright: 0 errors; ruff: 0 errors; pytest: 173 passed (10 new)."
     },
     {
       "id": "US-019",

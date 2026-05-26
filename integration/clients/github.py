@@ -201,6 +201,29 @@ class GitHubClient:
             raise ValueError("expected array from list_reviews")
         return [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
 
+    async def list_issues(
+        self, owner: str, repo: str, *, state: str = "open"
+    ) -> list[JsonDict]:
+        all_issues: list[JsonDict] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/issues",
+                params={"state": state, "per_page": 100, "page": page},
+            )
+            raw: Any = response.json()
+            if not isinstance(raw, list):
+                break
+            batch = [
+                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
+            ]
+            all_issues.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return all_issues
+
     async def get_branch_protection(
         self, owner: str, repo: str, branch: str
     ) -> JsonDict:
