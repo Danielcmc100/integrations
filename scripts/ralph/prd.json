@@ -326,8 +326,8 @@
         "Tests pass"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "structlog configured in integration/logging_config.py: JSON renderer with add_log_level, TimeStamper(iso), contextvars merge, StackInfoRenderer; configure_logging() called from main.py startup. Prometheus metrics in integration/metrics.py (custom REGISTRY): webhooks_received_total{source} Counter, sync_actions_total{type,outcome} Counter, sync_duration_seconds{type} Histogram, arq_queue_depth Gauge. GET /metrics exposes generate_latest(REGISTRY). webhooks.py increments webhooks_received_total on valid requests. process_plane_event and process_github_event wrapped with try/finally: track sync_actions_total(type,outcome) + sync_duration_seconds(type). arq_queue_depth updated every 15min via ARQ cron querying Redis ZCARD arq:queue. basedpyright: 0 errors; ruff: 0 errors; pytest: 181 passed (8 new)."
     },
     {
       "id": "US-020",

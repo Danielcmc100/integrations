@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -20,6 +21,7 @@ from integration.handlers._sync import (
     should_skip_loop,
     strip_footer,
 )
+from integration.metrics import sync_actions_total, sync_duration_seconds
 from integration.models import CardIssueLink, SyncSource
 
 log = structlog.get_logger()
@@ -267,26 +269,37 @@ async def process_plane_event(
     payload: dict[str, Any] = json.loads(payload_json)
     event_type: str = str(payload.get("event") or "")
 
-    async with ctx["session_factory"]() as session:
-        if event_type == "card.created":
-            await handle_card_created(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                github_client=ctx["github_client"],
-                config_service=ctx["config_service"],
-            )
-        elif event_type == "card.updated":
-            await handle_card_updated(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                github_client=ctx["github_client"],
-                config_service=ctx["config_service"],
-            )
-        else:
-            log.debug(
-                "process_plane_event: unhandled event",
-                event_type=event_type,
-                log_id=log_id,
-            )
+    start = time.perf_counter()
+    outcome = "success"
+    try:
+        async with ctx["session_factory"]() as session:
+            if event_type == "card.created":
+                await handle_card_created(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                    github_client=ctx["github_client"],
+                    config_service=ctx["config_service"],
+                )
+            elif event_type == "card.updated":
+                await handle_card_updated(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                    github_client=ctx["github_client"],
+                    config_service=ctx["config_service"],
+                )
+            else:
+                log.debug(
+                    "process_plane_event: unhandled event",
+                    event_type=event_type,
+                    log_id=log_id,
+                )
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        sync_actions_total.labels(type=event_type, outcome=outcome).inc()
+        sync_duration_seconds.labels(type=event_type).observe(
+            time.perf_counter() - start
+        )

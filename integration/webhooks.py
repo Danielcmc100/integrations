@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from integration.config import settings
 from integration.deps import EnqueuerDep, SessionDep
+from integration.metrics import webhooks_received_total
 from integration.models import WebhookEventLog, WebhookSource, WebhookStatus
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -41,6 +42,7 @@ async def github_webhook(
     body = await request.body()
     if not _verify_github_signature(settings.github_webhook_secret, x_hub_signature_256, body):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
+    webhooks_received_total.labels(source="github").inc()
     if not x_github_delivery:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="missing delivery id"
@@ -80,6 +82,7 @@ async def plane_webhook(
     body = await request.body()
     if not _verify_plane_secret(settings.plane_webhook_secret, x_plane_signature):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
+    webhooks_received_total.labels(source="plane").inc()
     payload_hash = hashlib.sha256(body).hexdigest()
     now = datetime.now(UTC)
     window_start = now - PLANE_DEDUPE_WINDOW

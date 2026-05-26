@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from integration.handlers._sync import (
     should_skip_loop,
     strip_footer,
 )
+from integration.metrics import sync_actions_total, sync_duration_seconds
 from integration.models import CardIssueLink, PrNotificationState, SyncSource
 from integration.pr_ready import compute_ready
 
@@ -889,122 +891,148 @@ async def handle_pr_closed_discord(
     log.info("pr_closed_discord: thread archived", pr_number=pr_number, thread_id=thread_id)
 
 
+def _gh_event_label(payload: dict[str, Any]) -> str:
+    action = str(payload.get("action") or "")
+    if "pull_request" in payload:
+        return f"pull_request.{action}"
+    if "check_suite" in payload:
+        return f"check_suite.{action}"
+    if "review" in payload:
+        return f"review.{action}"
+    if "comment" in payload:
+        return f"issue_comment.{action}"
+    if "issue" in payload:
+        return f"issue.{action}"
+    return action or "unknown"
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
     payload: dict[str, Any] = json.loads(payload_json)
     action: str = str(payload.get("action") or "")
-    event_type: str = str(ctx.get("event_type") or "")
+    event_type: str = _gh_event_label(payload)
 
-    if "issue" in payload and action == "opened":
-        async with ctx["session_factory"]() as session:
-            await handle_issue_opened(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                github_client=ctx["github_client"],
-                config_service=ctx["config_service"],
-            )
-    elif "issue" in payload and action == "edited":
-        async with ctx["session_factory"]() as session:
-            await handle_issue_edited(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-            )
-    elif "issue" in payload and action in ("labeled", "unlabeled"):
-        async with ctx["session_factory"]() as session:
-            await handle_issue_labels_changed(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                config_service=ctx["config_service"],
-            )
-    elif "issue" in payload and action in ("assigned", "unassigned"):
-        async with ctx["session_factory"]() as session:
-            await handle_issue_assignees_changed(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                config_service=ctx["config_service"],
-            )
-    elif "issue" in payload and action == "closed":
-        async with ctx["session_factory"]() as session:
-            await handle_issue_closed(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-            )
-    elif "comment" in payload and action == "created":
-        async with ctx["session_factory"]() as session:
-            await handle_issue_comment_created(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-            )
-    elif "pull_request" in payload and action in ("opened", "ready_for_review"):
-        _db: Any = ctx.get("discord_bot")
-        if _db is not None:
+    start = time.perf_counter()
+    outcome = "success"
+    try:
+        if "issue" in payload and action == "opened":
             async with ctx["session_factory"]() as session:
-                await handle_pr_notification(
+                await handle_issue_opened(
                     payload,
                     session=session,
+                    plane_client=ctx["plane_client"],
                     github_client=ctx["github_client"],
-                    discord_bot=_db,
-                    discord_channel_id=settings.discord_review_channel_id,
+                    config_service=ctx["config_service"],
                 )
-    elif "pull_request" in payload and action == "reopened":
-        _db = ctx.get("discord_bot")
-        if _db is not None:
+        elif "issue" in payload and action == "edited":
             async with ctx["session_factory"]() as session:
-                await handle_pr_notification(
+                await handle_issue_edited(
                     payload,
                     session=session,
-                    github_client=ctx["github_client"],
-                    discord_bot=_db,
-                    discord_channel_id=settings.discord_review_channel_id,
-                    new_cycle=True,
+                    plane_client=ctx["plane_client"],
                 )
-    elif "check_suite" in payload and action == "completed":
-        _db = ctx.get("discord_bot")
-        if _db is not None:
+        elif "issue" in payload and action in ("labeled", "unlabeled"):
             async with ctx["session_factory"]() as session:
-                await handle_check_suite_completed(
+                await handle_issue_labels_changed(
                     payload,
                     session=session,
-                    github_client=ctx["github_client"],
-                    discord_bot=_db,
-                    discord_channel_id=settings.discord_review_channel_id,
+                    plane_client=ctx["plane_client"],
+                    config_service=ctx["config_service"],
                 )
-    elif "review" in payload and action == "submitted":
-        _db = ctx.get("discord_bot")
-        if _db is not None:
+        elif "issue" in payload and action in ("assigned", "unassigned"):
             async with ctx["session_factory"]() as session:
-                await handle_pr_review_submitted(
+                await handle_issue_assignees_changed(
                     payload,
                     session=session,
-                    discord_bot=_db,
+                    plane_client=ctx["plane_client"],
+                    config_service=ctx["config_service"],
                 )
-    elif "pull_request" in payload and action == "closed":
-        async with ctx["session_factory"]() as session:
-            await handle_pr_merged(
-                payload,
-                session=session,
-                plane_client=ctx["plane_client"],
-                config_service=ctx["config_service"],
+        elif "issue" in payload and action == "closed":
+            async with ctx["session_factory"]() as session:
+                await handle_issue_closed(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
+        elif "comment" in payload and action == "created":
+            async with ctx["session_factory"]() as session:
+                await handle_issue_comment_created(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
+        elif "pull_request" in payload and action in ("opened", "ready_for_review"):
+            _db: Any = ctx.get("discord_bot")
+            if _db is not None:
+                async with ctx["session_factory"]() as session:
+                    await handle_pr_notification(
+                        payload,
+                        session=session,
+                        github_client=ctx["github_client"],
+                        discord_bot=_db,
+                        discord_channel_id=settings.discord_review_channel_id,
+                    )
+        elif "pull_request" in payload and action == "reopened":
+            _db = ctx.get("discord_bot")
+            if _db is not None:
+                async with ctx["session_factory"]() as session:
+                    await handle_pr_notification(
+                        payload,
+                        session=session,
+                        github_client=ctx["github_client"],
+                        discord_bot=_db,
+                        discord_channel_id=settings.discord_review_channel_id,
+                        new_cycle=True,
+                    )
+        elif "check_suite" in payload and action == "completed":
+            _db = ctx.get("discord_bot")
+            if _db is not None:
+                async with ctx["session_factory"]() as session:
+                    await handle_check_suite_completed(
+                        payload,
+                        session=session,
+                        github_client=ctx["github_client"],
+                        discord_bot=_db,
+                        discord_channel_id=settings.discord_review_channel_id,
+                    )
+        elif "review" in payload and action == "submitted":
+            _db = ctx.get("discord_bot")
+            if _db is not None:
+                async with ctx["session_factory"]() as session:
+                    await handle_pr_review_submitted(
+                        payload,
+                        session=session,
+                        discord_bot=_db,
+                    )
+        elif "pull_request" in payload and action == "closed":
+            async with ctx["session_factory"]() as session:
+                await handle_pr_merged(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                    config_service=ctx["config_service"],
+                )
+            _db = ctx.get("discord_bot")
+            if _db is not None:
+                async with ctx["session_factory"]() as session:
+                    await handle_pr_closed_discord(
+                        payload,
+                        session=session,
+                        discord_bot=_db,
+                    )
+        else:
+            log.debug(
+                "process_github_event: unhandled event",
+                action=action,
+                event_type=event_type,
+                log_id=log_id,
             )
-        _db = ctx.get("discord_bot")
-        if _db is not None:
-            async with ctx["session_factory"]() as session:
-                await handle_pr_closed_discord(
-                    payload,
-                    session=session,
-                    discord_bot=_db,
-                )
-    else:
-        log.debug(
-            "process_github_event: unhandled event",
-            action=action,
-            event_type=event_type,
-            log_id=log_id,
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        sync_actions_total.labels(type=event_type, outcome=outcome).inc()
+        sync_duration_seconds.labels(type=event_type).observe(
+            time.perf_counter() - start
         )

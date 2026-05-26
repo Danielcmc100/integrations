@@ -15,6 +15,7 @@ from integration.config_service import ConfigService
 from integration.discord_bot import DiscordBot
 from integration.handlers.github import process_github_event
 from integration.handlers.plane import process_plane_event
+from integration.metrics import arq_queue_depth
 from integration.reminders import send_review_reminders
 
 log = structlog.get_logger()
@@ -48,6 +49,13 @@ async def startup(ctx: dict[str, Any]) -> None:
         log.warning("discord_bot_token not set; Discord notifications disabled")
 
 
+async def update_arq_queue_depth(ctx: dict[str, Any]) -> None:
+    redis: Any = ctx.get("redis")
+    if redis is not None:
+        depth = await redis.zcard("arq:queue")
+        arq_queue_depth.set(int(depth))
+
+
 async def shutdown(ctx: dict[str, Any]) -> None:
     plane: PlaneClient = ctx["plane_client"]
     github: GitHubClient = ctx["github_client"]
@@ -60,7 +68,10 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 class WorkerSettings:
     functions: typing.ClassVar[list[object]] = [process_plane_event, process_github_event]
-    cron_jobs: typing.ClassVar[list[object]] = [cron(send_review_reminders, minute=0)]
+    cron_jobs: typing.ClassVar[list[object]] = [
+        cron(send_review_reminders, minute=0),
+        cron(update_arq_queue_depth, minute={0, 15, 30, 45}),
+    ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
