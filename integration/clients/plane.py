@@ -106,6 +106,17 @@ class PlaneClient:
         )
         return _as_json_dict(response)
 
+    async def get_card_by_sequence(
+        self, project_id: str, sequence_id: int
+    ) -> JsonDict | None:
+        response = await self._request(
+            "GET",
+            f"{self._ws_prefix(project_id)}/issues/",
+            params={"sequence_id": sequence_id},
+        )
+        items = _as_json_list(response)
+        return items[0] if items else None
+
 
 def _parse_retry_after(value: str | None) -> float:
     return _safe_float(value, 1.0)

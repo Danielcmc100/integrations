@@ -52,6 +52,11 @@ files: integration/config.py, integration/handlers/github.py, tests/test_handler
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 85 passed (4 new)
 notes: Handler issue_comment.created -> Plane add_comment prefixed '[GitHub @<login>]: '. Bot skip via github_bot_login setting. No link -> warning+skip. Dispatcher updated. Plane->GH not implemented per story.
 
+2026-05-26 US-012 PASS
+files: integration/clients/plane.py, integration/handlers/github.py, tests/test_handler_pr_merged.py
+checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 91 passed (6 new)
+notes: handle_pr_merged: merged=false skip; branch regex extracts number; gh_issue_number lookup first, sequence_id fallback; body Closes/Fixes/Resolves #N parsed; Plane card -> Done; comment 'Fechado via PR <url> (merge <sha>)'; dispatcher updated for pull_request.closed.
+
 2026-05-26 US-010 PASS
 files: integration/handlers/_sync.py, integration/handlers/plane.py, integration/handlers/github.py, integration/clients/github.py, tests/test_handler_state_sync.py
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 81 passed (12 new)

@@ -208,8 +208,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "handle_pr_merged in integration/handlers/github.py. PR closed with merged=false -> info log + skip. Branch regex ^(?P<num>\\d+)- extracts leading number; no match -> WARN + no-op. Resolves CardIssueLink by gh_issue_number first; fallback via PlaneClient.get_card_by_sequence (new method, GET /issues/?sequence_id=N) + fetch_link_by_plane. Body Closes/Fixes/Resolves #N parsed (IGNORECASE); all referenced numbers also processed. Transitions Plane card to Done (group=completed state). Adds comment 'Fechado via PR <url> (merge <sha>)'. Dispatcher updated: pull_request.closed -> handle_pr_merged. basedpyright: 0 errors; ruff: 0 errors; pytest: 91 passed (6 new)."
     },
     {
       "id": "US-013",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -17,6 +18,7 @@ from integration.handlers._sync import (
     event_wins_conflict,
     extract_gh_coords,
     fetch_link_by_gh,
+    fetch_link_by_plane,
     parse_dt,
     should_skip_loop,
     strip_footer,
@@ -30,6 +32,9 @@ DEFAULT_LABEL_NAME = "Feature"
 DEFAULT_PRIORITY = "medium"
 DONE_STATE_GROUP = "completed"
 CLOSED_BY_PR_REASON = "completed_by_pull_request"
+
+_BRANCH_NUM_RE = re.compile(r"^(?P<num>\d+)-")
+_CLOSES_RE = re.compile(r"(?:Closes|Fixes|Resolves)\s+#(\d+)", re.IGNORECASE)
 
 
 def _utcnow() -> datetime:
@@ -436,6 +441,106 @@ async def handle_issue_comment_created(
     )
 
 
+async def handle_pr_merged(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+    config_service: ConfigService,
+    now_fn: Callable[[], datetime] = _utcnow,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw) if isinstance(pr_raw, dict) else {}
+
+    merged: bool = bool(pr.get("merged"))
+    if not merged:
+        log.info("pull_request.closed: not merged, skip")
+        return
+
+    repo_raw: Any = payload.get("repository")
+    repo_data: dict[str, Any] = (
+        cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    )
+    gh_repo: str = str(repo_data.get("full_name") or "")
+    if not gh_repo:
+        log.warning("pull_request.closed: missing repository.full_name")
+        return
+
+    head_raw: Any = pr.get("head")
+    head: dict[str, Any] = cast("dict[str, Any]", head_raw) if isinstance(head_raw, dict) else {}
+    branch: str = str(head.get("ref") or "")
+    pr_url: str = str(pr.get("html_url") or "")
+    merge_sha: str = str(pr.get("merge_commit_sha") or "")
+    pr_body: str = str(pr.get("body") or "")
+
+    # Plane project_id for sequence fallback
+    repo_map = await config_service.get_repo_module_by_repo(gh_repo)
+    plane_project_id: str | None = repo_map.plane_project_id if repo_map is not None else None
+
+    # Collect issue numbers: branch prefix + body Closes #N
+    issue_numbers: set[int] = set()
+    branch_match = _BRANCH_NUM_RE.match(branch)
+    if branch_match:
+        issue_numbers.add(int(branch_match.group("num")))
+    else:
+        log.warning("pull_request.closed: branch does not match pattern", branch=branch)
+
+    for closes_match in _CLOSES_RE.finditer(pr_body):
+        issue_numbers.add(int(closes_match.group(1)))
+
+    if not issue_numbers:
+        return
+
+    comment_text = f"Fechado via PR {pr_url} (merge {merge_sha})"
+
+    for issue_num in issue_numbers:
+        link = await fetch_link_by_gh(session, gh_repo, issue_num)
+
+        if link is None and plane_project_id is not None:
+            card = await plane_client.get_card_by_sequence(plane_project_id, issue_num)
+            if card is not None:
+                card_id = str(card.get("id") or "")
+                if card_id:
+                    link = await fetch_link_by_plane(session, card_id)
+
+        if link is None:
+            log.warning(
+                "pull_request.closed: no link for issue number",
+                gh_repo=gh_repo,
+                issue_num=issue_num,
+            )
+            continue
+
+        states = await plane_client.list_states(link.plane_project_id)
+        done_state_id: str | None = None
+        for s in states:
+            if str(s.get("group") or "") == DONE_STATE_GROUP:
+                done_state_id = str(s["id"])
+                break
+
+        if done_state_id is None:
+            log.warning(
+                "pull_request.closed: no completed state in Plane",
+                project_id=link.plane_project_id,
+            )
+            continue
+
+        await plane_client.update_card(
+            link.plane_project_id, link.plane_card_id, {"state": done_state_id}
+        )
+        await plane_client.add_comment(
+            link.plane_project_id, link.plane_card_id, comment_text
+        )
+        link.last_synced_at = now_fn()
+        link.sync_source_last = SyncSource.github
+        await session.commit()
+        log.info(
+            "pull_request.closed: plane card transitioned to Done",
+            card_id=link.plane_card_id,
+            issue_num=issue_num,
+        )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -488,6 +593,14 @@ async def process_github_event(
                 payload,
                 session=session,
                 plane_client=ctx["plane_client"],
+            )
+    elif "pull_request" in payload and action == "closed":
+        async with ctx["session_factory"]() as session:
+            await handle_pr_merged(
+                payload,
+                session=session,
+                plane_client=ctx["plane_client"],
+                config_service=ctx["config_service"],
             )
     else:
         log.debug(
