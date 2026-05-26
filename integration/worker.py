@@ -4,6 +4,7 @@ import typing
 from typing import Any, cast
 
 import structlog
+from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -14,6 +15,7 @@ from integration.config_service import ConfigService
 from integration.discord_bot import DiscordBot
 from integration.handlers.github import process_github_event
 from integration.handlers.plane import process_plane_event
+from integration.reminders import send_review_reminders
 
 log = structlog.get_logger()
 
@@ -58,6 +60,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 class WorkerSettings:
     functions: typing.ClassVar[list[object]] = [process_plane_event, process_github_event]
+    cron_jobs: typing.ClassVar[list[object]] = [cron(send_review_reminders, minute=0)]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)

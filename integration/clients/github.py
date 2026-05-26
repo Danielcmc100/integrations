@@ -190,6 +190,17 @@ class GitHubClient:
             raise ValueError("check_runs not an array")
         return [cast(JsonDict, r) for r in cast("list[Any]", runs) if isinstance(r, dict)]
 
+    async def list_reviews(
+        self, owner: str, repo: str, number: int
+    ) -> list[JsonDict]:
+        response = await self._request(
+            "GET", f"/repos/{owner}/{repo}/pulls/{number}/reviews"
+        )
+        raw: Any = response.json()
+        if not isinstance(raw, list):
+            raise ValueError("expected array from list_reviews")
+        return [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
+
     async def get_branch_protection(
         self, owner: str, repo: str, branch: str
     ) -> JsonDict:

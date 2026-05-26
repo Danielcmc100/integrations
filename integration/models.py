@@ -91,6 +91,9 @@ class PrNotificationState(Base):
     last_ready_cycle_id: Mapped[str] = mapped_column(String, nullable=False, default="")
     discord_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     discord_thread_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_reminder_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class WebhookEventLog(Base):
