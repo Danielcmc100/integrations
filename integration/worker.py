@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import typing
-from typing import Any
+from typing import Any, cast
 
+import structlog
 from arq.connections import RedisSettings
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -10,8 +11,11 @@ from integration.clients.github import GitHubClient
 from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
+from integration.discord_bot import DiscordBot
 from integration.handlers.github import process_github_event
 from integration.handlers.plane import process_plane_event
+
+log = structlog.get_logger()
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -33,12 +37,23 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     ctx["config_service"] = ConfigService(session_factory)
 
+    if settings.discord_bot_token:
+        discord_bot = DiscordBot(settings.discord_bot_token)
+        await discord_bot.start()
+        ctx["discord_bot"] = discord_bot
+    else:
+        ctx["discord_bot"] = None
+        log.warning("discord_bot_token not set; Discord notifications disabled")
+
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     plane: PlaneClient = ctx["plane_client"]
     github: GitHubClient = ctx["github_client"]
     await plane.aclose()
     await github.aclose()
+    discord_bot_raw: Any = ctx.get("discord_bot")
+    if discord_bot_raw is not None:
+        await cast(DiscordBot, discord_bot_raw).stop()
 
 
 class WorkerSettings:

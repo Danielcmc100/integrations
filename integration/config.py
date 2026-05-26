@@ -23,5 +23,8 @@ class Settings(BaseSettings):
     plane_app_url: str = "https://app.plane.so"
     github_bot_login: str = ""
 
+    discord_bot_token: str = ""
+    discord_review_channel_id: str = ""
+
 
 settings = Settings()

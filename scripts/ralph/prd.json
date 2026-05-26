@@ -242,8 +242,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "DiscordBot class in integration/discord_bot.py: wraps discord.py Client, starts as asyncio background task, exposes post_review_message(channel_id, embed, *, view) -> message_id. DiscordBotProtocol (Protocol) for testability. Config: discord_bot_token, discord_review_channel_id added to Settings. Handlers: handle_pr_notification (pull_request opened/ready_for_review/reopened) and handle_check_suite_completed in handlers/github.py. Both call compute_ready; if ready and ready_notified_at is None, post discord embed with title/author/repo/branch/additions-deletions/plane-card-url(if mapped)/reviewers plus View with Review PR link button; set ready_notified_at+discord_message_id. Reopened sets new last_ready_cycle_id and resets ready_notified_at. Worker initializes DiscordBot on startup, stops on shutdown. basedpyright: 0 errors; ruff: 0 errors; pytest: 116 passed (15 new)."
     },
     {
       "id": "US-015",

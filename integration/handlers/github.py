@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import discord
+import discord.ui
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integration.clients.github import GitHubClient
 from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
+from integration.discord_bot import DiscordBotProtocol
 from integration.handlers._sync import (
     detect_conflict,
     event_wins_conflict,
@@ -23,7 +28,8 @@ from integration.handlers._sync import (
     should_skip_loop,
     strip_footer,
 )
-from integration.models import CardIssueLink, SyncSource
+from integration.models import CardIssueLink, PrNotificationState, SyncSource
+from integration.pr_ready import compute_ready
 
 log = structlog.get_logger()
 
@@ -541,6 +547,262 @@ async def handle_pr_merged(
         )
 
 
+def _build_pr_embed(
+    pr: dict[str, Any],
+    *,
+    plane_card_url: str | None = None,
+) -> tuple[discord.Embed, discord.ui.View]:
+    pr_number = int(pr.get("number") or 0)
+    title = str(pr.get("title") or "")
+    html_url = str(pr.get("html_url") or "")
+
+    user_raw: Any = pr.get("user") or {}
+    user = cast("dict[str, Any]", user_raw)
+    author_login = str(user.get("login") or "")
+
+    head_raw: Any = pr.get("head") or {}
+    head = cast("dict[str, Any]", head_raw)
+    branch = str(head.get("ref") or "")
+    repo_info_raw: Any = head.get("repo") or {}
+    repo_info = cast("dict[str, Any]", repo_info_raw)
+    gh_repo = str(repo_info.get("full_name") or "")
+
+    additions = int(pr.get("additions") or 0)
+    deletions = int(pr.get("deletions") or 0)
+
+    reviewers_raw: Any = pr.get("requested_reviewers") or []
+    reviewer_names: list[str] = []
+    if isinstance(reviewers_raw, list):
+        for r in cast("list[Any]", reviewers_raw):
+            if isinstance(r, dict):
+                r_dict = cast("dict[str, Any]", r)
+                login = str(r_dict.get("login") or "")
+                if login:
+                    reviewer_names.append(login)
+
+    embed = discord.Embed(
+        title=f"PR #{pr_number}: {title}",
+        color=0x00C853,
+    )
+    if html_url:
+        embed.url = html_url
+    if author_login:
+        embed.set_author(name=author_login)
+    embed.add_field(name="Repo", value=gh_repo or "unknown", inline=True)
+    embed.add_field(name="Branch", value=branch or "unknown", inline=True)
+    embed.add_field(name="Changes", value=f"+{additions} / -{deletions}", inline=True)
+    if plane_card_url:
+        embed.add_field(name="Plane Card", value=plane_card_url, inline=False)
+    if reviewer_names:
+        embed.add_field(name="Reviewers", value=", ".join(reviewer_names), inline=False)
+
+    view = discord.ui.View()
+    if html_url:
+        view.add_item(
+            discord.ui.Button(
+                style=discord.ButtonStyle.link,
+                label="Review PR",
+                url=html_url,
+            )
+        )
+
+    return embed, view
+
+
+async def _upsert_pr_state(
+    session: AsyncSession,
+    pr_node_id: str,
+    gh_repo: str,
+    pr_number: int,
+    *,
+    new_cycle: bool = False,
+) -> PrNotificationState:
+    result = await session.execute(
+        select(PrNotificationState).where(PrNotificationState.pr_node_id == pr_node_id)
+    )
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = PrNotificationState(
+            pr_node_id=pr_node_id,
+            gh_repo=gh_repo,
+            pr_number=pr_number,
+            last_ready_cycle_id=str(uuid.uuid4()),
+            ready_notified_at=None,
+            discord_message_id=None,
+            discord_thread_id=None,
+        )
+        session.add(state)
+    elif new_cycle:
+        state.last_ready_cycle_id = str(uuid.uuid4())
+        state.ready_notified_at = None
+        state.discord_message_id = None
+    return state
+
+
+async def _check_and_notify(
+    pr: dict[str, Any],
+    state: PrNotificationState,
+    *,
+    session: AsyncSession,
+    github_client: GitHubClient,
+    discord_bot: DiscordBotProtocol,
+    discord_channel_id: str,
+    now_fn: Callable[[], datetime] = _utcnow,
+    plane_app_url: str | None = None,
+    plane_workspace: str | None = None,
+) -> None:
+    if state.ready_notified_at is not None:
+        log.info("pr_ready: already notified this cycle", pr_number=state.pr_number)
+        return
+
+    is_ready = await compute_ready(pr, github_client)
+    if not is_ready:
+        log.debug("pr_ready: not ready", pr_number=state.pr_number)
+        return
+
+    plane_card_url: str | None = None
+    link = await fetch_link_by_gh(session, state.gh_repo, state.pr_number)
+    if link is not None:
+        ws = plane_workspace if plane_workspace is not None else settings.plane_workspace
+        app_url = plane_app_url if plane_app_url is not None else settings.plane_app_url
+        plane_card_url = (
+            f"{app_url.rstrip('/')}/{ws}/projects/"
+            f"{link.plane_project_id}/issues/{link.plane_card_id}/"
+        )
+
+    embed, view = _build_pr_embed(pr, plane_card_url=plane_card_url)
+    message_id = await discord_bot.post_review_message(
+        discord_channel_id, embed, view=view
+    )
+
+    state.ready_notified_at = now_fn()
+    state.discord_message_id = message_id
+    await session.commit()
+    log.info(
+        "pr_ready: discord notification sent",
+        pr_number=state.pr_number,
+        message_id=message_id,
+    )
+
+
+async def handle_pr_notification(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    github_client: GitHubClient,
+    discord_bot: DiscordBotProtocol,
+    discord_channel_id: str,
+    new_cycle: bool = False,
+    now_fn: Callable[[], datetime] = _utcnow,
+    plane_app_url: str | None = None,
+    plane_workspace: str | None = None,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    if not isinstance(pr_raw, dict):
+        log.warning("pull_request event: missing pull_request key")
+        return
+    pr = cast("dict[str, Any]", pr_raw)
+
+    repo_raw: Any = payload.get("repository")
+    repo = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    gh_repo = str(repo.get("full_name") or "")
+
+    pr_node_id = str(pr.get("node_id") or "")
+    pr_number = int(pr.get("number") or 0)
+
+    if not pr_node_id or not pr_number or not gh_repo:
+        log.warning(
+            "pull_request event: missing required fields",
+            pr_node_id=pr_node_id,
+            pr_number=pr_number,
+            gh_repo=gh_repo,
+        )
+        return
+
+    state = await _upsert_pr_state(
+        session, pr_node_id, gh_repo, pr_number, new_cycle=new_cycle
+    )
+    await session.commit()
+
+    await _check_and_notify(
+        pr,
+        state,
+        session=session,
+        github_client=github_client,
+        discord_bot=discord_bot,
+        discord_channel_id=discord_channel_id,
+        now_fn=now_fn,
+        plane_app_url=plane_app_url,
+        plane_workspace=plane_workspace,
+    )
+
+
+async def handle_check_suite_completed(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    github_client: GitHubClient,
+    discord_bot: DiscordBotProtocol,
+    discord_channel_id: str,
+    now_fn: Callable[[], datetime] = _utcnow,
+    plane_app_url: str | None = None,
+    plane_workspace: str | None = None,
+) -> None:
+    suite_raw: Any = payload.get("check_suite")
+    if not isinstance(suite_raw, dict):
+        return
+    suite = cast("dict[str, Any]", suite_raw)
+
+    repo_raw: Any = payload.get("repository")
+    repo = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    gh_repo = str(repo.get("full_name") or "")
+    if not gh_repo or "/" not in gh_repo:
+        return
+
+    owner, repo_name = gh_repo.split("/", 1)
+
+    prs_raw: Any = suite.get("pull_requests") or []
+    if not isinstance(prs_raw, list):
+        return
+
+    for pr_ref_raw in cast("list[Any]", prs_raw):
+        if not isinstance(pr_ref_raw, dict):
+            continue
+        pr_ref = cast("dict[str, Any]", pr_ref_raw)
+        pr_number = int(pr_ref.get("number") or 0)
+        if not pr_number:
+            continue
+
+        try:
+            pr = await github_client.get_pr(owner, repo_name, pr_number)
+        except Exception:
+            log.warning(
+                "check_suite.completed: failed to fetch PR",
+                gh_repo=gh_repo,
+                pr_number=pr_number,
+            )
+            continue
+
+        pr_node_id = str(pr.get("node_id") or "")
+        if not pr_node_id:
+            continue
+
+        state = await _upsert_pr_state(session, pr_node_id, gh_repo, pr_number)
+        await session.commit()
+
+        await _check_and_notify(
+            pr,
+            state,
+            session=session,
+            github_client=github_client,
+            discord_bot=discord_bot,
+            discord_channel_id=discord_channel_id,
+            now_fn=now_fn,
+            plane_app_url=plane_app_url,
+            plane_workspace=plane_workspace,
+        )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -594,6 +856,40 @@ async def process_github_event(
                 session=session,
                 plane_client=ctx["plane_client"],
             )
+    elif "pull_request" in payload and action in ("opened", "ready_for_review"):
+        _db: Any = ctx.get("discord_bot")
+        if _db is not None:
+            async with ctx["session_factory"]() as session:
+                await handle_pr_notification(
+                    payload,
+                    session=session,
+                    github_client=ctx["github_client"],
+                    discord_bot=_db,
+                    discord_channel_id=settings.discord_review_channel_id,
+                )
+    elif "pull_request" in payload and action == "reopened":
+        _db = ctx.get("discord_bot")
+        if _db is not None:
+            async with ctx["session_factory"]() as session:
+                await handle_pr_notification(
+                    payload,
+                    session=session,
+                    github_client=ctx["github_client"],
+                    discord_bot=_db,
+                    discord_channel_id=settings.discord_review_channel_id,
+                    new_cycle=True,
+                )
+    elif "check_suite" in payload and action == "completed":
+        _db = ctx.get("discord_bot")
+        if _db is not None:
+            async with ctx["session_factory"]() as session:
+                await handle_check_suite_completed(
+                    payload,
+                    session=session,
+                    github_client=ctx["github_client"],
+                    discord_bot=_db,
+                    discord_channel_id=settings.discord_review_channel_id,
+                )
     elif "pull_request" in payload and action == "closed":
         async with ctx["session_factory"]() as session:
             await handle_pr_merged(

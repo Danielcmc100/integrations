@@ -61,9 +61,9 @@ def _fixed_time(t: float = 1000.0) -> Any:
 
 @pytest.fixture(autouse=True)
 def clear_cache() -> Any:
-    pr_ready_module._protection_cache.clear()
+    pr_ready_module._protection_cache.clear()  # pyright: ignore[reportPrivateUsage]
     yield
-    pr_ready_module._protection_cache.clear()
+    pr_ready_module._protection_cache.clear()  # pyright: ignore[reportPrivateUsage]
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def test_branch_protection_cache_expired() -> None:
         compute_ready(
             _make_pr(),
             client,
-            time_fn=_fixed_time(1000.0 + pr_ready_module._CACHE_TTL + 1),
+            time_fn=_fixed_time(1000.0 + pr_ready_module._CACHE_TTL + 1),  # pyright: ignore[reportPrivateUsage]
         )
     )
 
