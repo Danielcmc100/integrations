@@ -10,6 +10,7 @@ from integration.clients.github import GitHubClient
 from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
+from integration.handlers.github import process_github_event
 from integration.handlers.plane import process_plane_event
 
 
@@ -41,7 +42,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 class WorkerSettings:
-    functions: typing.ClassVar[list[object]] = [process_plane_event]
+    functions: typing.ClassVar[list[object]] = [process_plane_event, process_github_event]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)

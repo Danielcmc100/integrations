@@ -32,6 +32,11 @@ files: integration/clients/plane.py, integration/clients/github.py, integration/
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 17 passed
 notes: Clients already existed. Fixed: (1) JWT test used frozen mock time 2023 -> expired in 2026; added options={"verify_exp": False} since test only checks iss/iat/exp presence. (2) Coroutine vs Awaitable in _run test helpers. (3) basedpyright strict Unknown propagation: list[Unknown] element access and dict[Unknown,Unknown].get() both return Unknown; fixed by casting collections to typed equivalents (list[Any], dict[str,Any]) before element access/iteration. (4) SIM103 ruff: inlined _is_rate_limited return. (5) E501: wrapped long list comprehension in plane._as_json_list.
 
+2026-05-25 US-008 PASS
+files: integration/handlers/github.py, integration/clients/plane.py, integration/config_service.py, integration/worker.py, tests/test_handler_github_issue_opened.py
+checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 53 passed (7 new + 46 existing)
+notes: ARQ task process_github_event dispatches issues.opened to handle_issue_opened. Resolves module/project from gh_repo via get_repo_module_by_repo. Resolves Plane state 'Refinamento' from list_states. Resolves label via label_map or default 'Feature'. Places card in CURRENT cycle if one exists. Updates GH issue with Plane footer. Writes CardIssueLink(sync_source_last=github). Added list_labels/list_cycles/add_issue_to_cycle to PlaneClient; get_repo_module_by_repo/get_label_map_by_gh to ConfigService.
+
 2026-05-25 US-007 PASS
 files: integration/config.py, integration/webhooks.py, integration/handlers/__init__.py, integration/handlers/plane.py, integration/worker.py, tests/test_handler_plane_card_created.py
 checks: basedpyright -> 0 errors; ruff -> 0 errors; pytest -> 46 passed (5 new handler tests + 41 existing)

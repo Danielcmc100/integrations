@@ -66,3 +66,17 @@ class ConfigService:
             if um.plane_user_id == plane_user_id:
                 return um
         return None
+
+    async def get_repo_module_by_repo(self, gh_repo: str) -> RepoModuleMap | None:
+        await self._ensure_loaded()
+        for rm in self._cache.repo_modules:
+            if rm.gh_repo == gh_repo:
+                return rm
+        return None
+
+    async def get_label_map_by_gh(self, gh_repo: str, gh_label: str) -> LabelMap | None:
+        await self._ensure_loaded()
+        for lm in self._cache.label_maps:
+            if lm.gh_repo == gh_repo and lm.gh_label == gh_label:
+                return lm
+        return None

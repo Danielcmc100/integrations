@@ -88,6 +88,24 @@ class PlaneClient:
         response = await self._request("GET", f"{self._ws_prefix(project_id)}/modules/")
         return _as_json_list(response)
 
+    async def list_labels(self, project_id: str) -> list[JsonDict]:
+        response = await self._request("GET", f"{self._ws_prefix(project_id)}/labels/")
+        return _as_json_list(response)
+
+    async def list_cycles(self, project_id: str) -> list[JsonDict]:
+        response = await self._request("GET", f"{self._ws_prefix(project_id)}/cycles/")
+        return _as_json_list(response)
+
+    async def add_issue_to_cycle(
+        self, project_id: str, cycle_id: str, issue_id: str
+    ) -> JsonDict:
+        response = await self._request(
+            "POST",
+            f"{self._ws_prefix(project_id)}/cycles/{cycle_id}/cycle-issues/",
+            json={"issues": [issue_id]},
+        )
+        return _as_json_dict(response)
+
 
 def _parse_retry_after(value: str | None) -> float:
     return _safe_float(value, 1.0)

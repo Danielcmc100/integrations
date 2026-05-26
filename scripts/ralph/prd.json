@@ -136,8 +136,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "handle_issue_opened in integration/handlers/github.py. Resolves gh_repo from payload.repository.full_name via ConfigService.get_repo_module_by_repo. Missing repo -> skip. Resolves state 'Refinamento' from list_states; falls back to no-state if not found. Resolves label via ConfigService.get_label_map_by_gh (first matching GH label) or default 'Feature' via list_labels; no label if neither found. Creates Plane card (name=title, priority=medium). Checks list_cycles for CURRENT cycle; if found, calls add_issue_to_cycle. Updates GH issue body with Plane footer. Writes CardIssueLink(sync_source_last=github). Added list_labels/list_cycles/add_issue_to_cycle to PlaneClient. Added get_repo_module_by_repo/get_label_map_by_gh to ConfigService. process_github_event ARQ task dispatches issues.opened to handle_issue_opened. Worker updated to register process_github_event. basedpyright: 0 errors; ruff: 0 errors; pytest: 53 passed (7 new + 46 existing)."
     },
     {
       "id": "US-009",
