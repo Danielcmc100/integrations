@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -59,7 +58,7 @@ def test_webhook_github_increments_counter(monkeypatch: pytest.MonkeyPatch) -> N
     incremented: list[str] = []
 
     class FakeCounter:
-        def labels(self, *, source: str) -> "FakeCounter":
+        def labels(self, *, source: str) -> FakeCounter:
             incremented.append(source)
             return self
 
