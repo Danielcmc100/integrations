@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -16,15 +17,16 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _check_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+_bearer_scheme = HTTPBearer()
+
+
+def _check_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer_scheme)],
+) -> None:
     if not settings.admin_token:
         raise HTTPException(status_code=401, detail="unauthorized")
-    if authorization is None or not authorization.startswith("Bearer "):
-        log.info("missing or invalid authorization header", authorization=authorization)
-        raise HTTPException(status_code=402, detail="unauthorized")
-    token = authorization.removeprefix("Bearer ")
-    if token != settings.admin_token:
-        raise HTTPException(status_code=403, detail="unauthorized")
+    if credentials.credentials != settings.admin_token:
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 AdminAuth = Annotated[None, Depends(_check_admin)]
