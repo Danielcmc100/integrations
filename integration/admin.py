@@ -20,6 +20,7 @@ def _check_admin(authorization: Annotated[str | None, Header()] = None) -> None:
     if not settings.admin_token:
         raise HTTPException(status_code=401, detail="unauthorized")
     if authorization is None or not authorization.startswith("Bearer "):
+        log.info("missing or invalid authorization header", authorization=authorization)
         raise HTTPException(status_code=402, detail="unauthorized")
     token = authorization.removeprefix("Bearer ")
     if token != settings.admin_token:
