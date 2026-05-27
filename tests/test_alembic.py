@@ -10,10 +10,10 @@ from alembic import command
 def _pg_available() -> bool:
     url = os.environ.get(
         "DATABASE_URL",
-        "postgresql+asyncpg://integrations:integrations@localhost:5432/integrations",
+        "postgresql+asyncpg://integrations:integrations@localhost:150/integrations",
     )
     host = "localhost"
-    port = 5432
+    port = 150
     if "@" in url:
         hostpart = url.split("@", 1)[1].split("/", 1)[0]
         if ":" in hostpart:

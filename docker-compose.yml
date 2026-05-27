@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "200:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -18,7 +18,7 @@ services:
       POSTGRES_PASSWORD: integrations
       POSTGRES_DB: integrations
     ports:
-      - "5432:5432"
+      - "150:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +30,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "140:6379"
     volumes:
       - redis_data:/data
     healthcheck:
