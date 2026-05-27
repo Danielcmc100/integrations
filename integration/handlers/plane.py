@@ -89,6 +89,20 @@ async def handle_card_created(
         module_id = str(raw_module_ids[0])
 
     if module_id is None:
+        fetched = await plane_client.get_card(project_id, card_id)
+        fetched_module: Any = fetched.get("module")
+        fetched_module_ids_raw: Any = fetched.get("module_ids")
+        fetched_module_ids: list[Any] = (
+            cast("list[Any]", fetched_module_ids_raw)
+            if isinstance(fetched_module_ids_raw, list)
+            else []
+        )
+        if isinstance(fetched_module, str) and fetched_module:
+            module_id = fetched_module
+        elif fetched_module_ids:
+            module_id = str(fetched_module_ids[0])
+
+    if module_id is None:
         log.warning("card.created skipped: no module", card_id=card_id)
         return
 
