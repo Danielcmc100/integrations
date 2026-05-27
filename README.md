@@ -63,7 +63,32 @@ Set webhook URL to `https://<your-host>/webhooks/github`.
 In Plane workspace settings, add webhook pointing to `https://<your-host>/webhooks/plane`.  
 Set the shared secret — same value as `PLANE_WEBHOOK_SECRET`.
 
-### 4. Run
+### 4. Discord Bot
+
+Create a Discord application at [discord.com/developers/applications](https://discord.com/developers/applications):
+
+1. **New Application** → name it → go to **Bot** tab
+2. Click **Reset Token** → copy value → set as `DISCORD_BOT_TOKEN`
+3. Under **Privileged Gateway Intents**, enable:
+   - **Message Content Intent**
+4. Under **OAuth2 → URL Generator**, select scopes:
+   - `bot`
+   - `applications.commands`
+5. Bot permissions required:
+   - Send Messages
+   - Embed Links
+   - Create Public Threads
+   - Send Messages in Threads
+   - Manage Threads
+   - Read Message History
+6. Use generated URL to invite bot to your server
+
+**Get channel IDs:** Enable Developer Mode in Discord (Settings → Advanced), right-click channel → **Copy Channel ID**.
+
+- `DISCORD_REVIEW_CHANNEL_ID` — channel where PR review notifications post
+- `DISCORD_OPS_CHANNEL_ID` — channel for dead-letter failure alerts (optional)
+
+### 5. Run
 
 ```bash
 docker compose up -d
