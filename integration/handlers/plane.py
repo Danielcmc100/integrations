@@ -269,10 +269,17 @@ async def process_plane_event(
 ) -> None:
     payload: dict[str, Any] = json.loads(payload_json)
     event_type: str = str(payload.get("event") or "")
+    action: str = str(payload.get("action") or "")
+
+    # Plane sends event="issue" + action="created"/"updated" (observed) or "create"/"update" (docs)
+    # Legacy/test format: event="card.created"/"card.updated"
+    is_created = event_type == "card.created" or (event_type == "issue" and action in ("created", "create"))
+    is_updated = event_type == "card.updated" or (event_type == "issue" and action in ("updated", "update"))
+    metric_event_type = f"{event_type}.{action}" if action else event_type
 
     async def _dispatch() -> None:
         async with ctx["session_factory"]() as session:
-            if event_type == "card.created":
+            if is_created:
                 await handle_card_created(
                     payload,
                     session=session,
@@ -280,7 +287,7 @@ async def process_plane_event(
                     github_client=ctx["github_client"],
                     config_service=ctx["config_service"],
                 )
-            elif event_type == "card.updated":
+            elif is_updated:
                 await handle_card_updated(
                     payload,
                     session=session,
@@ -292,6 +299,7 @@ async def process_plane_event(
                 log.debug(
                     "process_plane_event: unhandled event",
                     event_type=event_type,
+                    action=action,
                     log_id=log_id,
                 )
 
@@ -302,7 +310,7 @@ async def process_plane_event(
             _dispatch,
             ctx=ctx,
             source="plane",
-            event_type=event_type,
+            event_type=metric_event_type,
             payload_json=payload_json,
         )
     except DeadLetteredError:
@@ -311,7 +319,7 @@ async def process_plane_event(
         outcome = "error"
         raise
     finally:
-        sync_actions_total.labels(type=event_type, outcome=outcome).inc()
-        sync_duration_seconds.labels(type=event_type).observe(
+        sync_actions_total.labels(type=metric_event_type, outcome=outcome).inc()
+        sync_duration_seconds.labels(type=metric_event_type).observe(
             time.perf_counter() - start
         )
