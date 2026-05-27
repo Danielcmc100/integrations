@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import select
 
@@ -13,6 +14,7 @@ from integration.metrics import webhooks_received_total
 from integration.models import WebhookEventLog, WebhookSource, WebhookStatus
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+log = structlog.get_logger()
 
 PLANE_DEDUPE_WINDOW = timedelta(minutes=5)
 
@@ -41,10 +43,19 @@ async def github_webhook(
     x_github_delivery: Annotated[str, Header()] = "",
 ) -> dict[str, str]:
     body = await request.body()
+    log.info(
+        "webhook.received",
+        source="github",
+        event_type=x_github_event,
+        delivery=x_github_delivery,
+        body_bytes=len(body),
+    )
     if not _verify_github_signature(settings.github_webhook_secret, x_hub_signature_256, body):
+        log.warning("webhook.rejected", source="github", reason="invalid_signature")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
     webhooks_received_total.labels(source="github").inc()
     if not x_github_delivery:
+        log.warning("webhook.rejected", source="github", reason="missing_delivery_id")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="missing delivery id"
         )
@@ -55,9 +66,10 @@ async def github_webhook(
         )
     )
     if existing is not None:
+        log.info("webhook.duplicate", source="github", delivery=x_github_delivery)
         return {"status": "duplicate"}
     log_id = uuid.uuid4()
-    log = WebhookEventLog(
+    event_log = WebhookEventLog(
         id=log_id,
         source=WebhookSource.github,
         event_type=x_github_event,
@@ -66,9 +78,15 @@ async def github_webhook(
         processed_at=None,
         status=WebhookStatus.pending,
     )
-    session.add(log)
+    session.add(event_log)
     await session.commit()
     await enqueuer.enqueue("process_github_event", str(log_id), body.decode())
+    log.info(
+        "webhook.enqueued",
+        source="github",
+        log_id=str(log_id),
+        event_type=x_github_event,
+    )
     return {"status": "accepted"}
 
 
@@ -81,7 +99,14 @@ async def plane_webhook(
     x_plane_event: Annotated[str, Header()] = "unknown",
 ) -> dict[str, str]:
     body = await request.body()
+    log.info(
+        "webhook.received",
+        source="plane",
+        event_type=x_plane_event,
+        body_bytes=len(body),
+    )
     if not _verify_plane_signature(settings.plane_webhook_secret, x_plane_signature, body):
+        log.warning("webhook.rejected", source="plane", reason="invalid_signature")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
     webhooks_received_total.labels(source="plane").inc()
     payload_hash = hashlib.sha256(body).hexdigest()
@@ -95,9 +120,10 @@ async def plane_webhook(
         )
     )
     if existing is not None:
+        log.info("webhook.duplicate", source="plane", payload_hash=payload_hash[:16])
         return {"status": "duplicate"}
     log_id = uuid.uuid4()
-    log = WebhookEventLog(
+    event_log = WebhookEventLog(
         id=log_id,
         source=WebhookSource.plane,
         event_type=x_plane_event,
@@ -106,7 +132,13 @@ async def plane_webhook(
         processed_at=None,
         status=WebhookStatus.pending,
     )
-    session.add(log)
+    session.add(event_log)
     await session.commit()
     await enqueuer.enqueue("process_plane_event", str(log_id), body.decode())
+    log.info(
+        "webhook.enqueued",
+        source="plane",
+        log_id=str(log_id),
+        event_type=x_plane_event,
+    )
     return {"status": "accepted"}

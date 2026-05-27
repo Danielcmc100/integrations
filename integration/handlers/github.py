@@ -11,6 +11,7 @@ from typing import Any, cast
 import discord
 import discord.ui
 import structlog
+import structlog.contextvars
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,6 +107,11 @@ async def handle_issue_opened(
         if str(s.get("name") or "") == REFINAMENTO_STATE_NAME:
             refinamento_state_id = str(s["id"])
             break
+    log.debug(
+        "issues.opened: state resolved",
+        state_name=REFINAMENTO_STATE_NAME,
+        state_id=refinamento_state_id,
+    )
 
     # Resolve Plane label via label_map or default "Feature"
     plane_label_id: str | None = None
@@ -113,6 +119,7 @@ async def handle_issue_opened(
         lm = await config_service.get_label_map_by_gh(gh_repo, gh_label)
         if lm is not None:
             plane_label_id = lm.plane_label_id
+            log.debug("issues.opened: label resolved via mapping", gh_label=gh_label, plane_label_id=plane_label_id)
             break
 
     if plane_label_id is None:
@@ -120,7 +127,11 @@ async def handle_issue_opened(
         for lbl in labels:
             if str(lbl.get("name") or "") == DEFAULT_LABEL_NAME:
                 plane_label_id = str(lbl["id"])
+                log.debug("issues.opened: label resolved via default", default_label=DEFAULT_LABEL_NAME)
                 break
+
+    if plane_label_id is None:
+        log.warning("issues.opened: no label resolved", gh_repo=gh_repo, gh_labels=gh_labels)
 
     card_payload: dict[str, Any] = {
         "name": issue_title,
@@ -131,15 +142,22 @@ async def handle_issue_opened(
     if plane_label_id is not None:
         card_payload["label_ids"] = [plane_label_id]
 
+    log.info("issues.opened: creating Plane card", gh_repo=gh_repo, issue_number=issue_number, project_id=plane_project_id)
     card = await plane_client.create_card(plane_project_id, card_payload)
     card_id: str = str(card["id"])
+    log.debug("issues.opened: plane card created", card_id=card_id)
 
     # Place in active cycle if one exists
     cycles = await plane_client.list_cycles(plane_project_id)
+    placed_in_cycle = False
     for cycle in cycles:
         if str(cycle.get("status") or "") == "CURRENT":
             await plane_client.add_issue_to_cycle(plane_project_id, str(cycle["id"]), card_id)
+            log.info("issues.opened: card added to active cycle", card_id=card_id, cycle_id=cycle["id"])
+            placed_in_cycle = True
             break
+    if not placed_in_cycle:
+        log.debug("issues.opened: no active cycle found, card not added to cycle", card_id=card_id)
 
     plane_card_url = (
         f"{app_url.rstrip('/')}/{ws}/projects/{plane_project_id}/issues/{card_id}/"
@@ -914,6 +932,15 @@ async def process_github_event(
     action: str = str(payload.get("action") or "")
     event_type: str = _gh_event_label(payload)
 
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        log_id=log_id,
+        event_type=event_type,
+        action=action,
+        source="github",
+    )
+    log.info("process_github_event.started")
+
     async def _dispatch() -> None:
         if "issue" in payload and action == "opened":
             async with ctx["session_factory"]() as session:
@@ -1021,7 +1048,7 @@ async def process_github_event(
                         discord_bot=_db,
                     )
         else:
-            log.debug(
+            log.warning(
                 "process_github_event: unhandled event",
                 action=action,
                 event_type=event_type,
@@ -1044,6 +1071,12 @@ async def process_github_event(
         outcome = "error"
         raise
     finally:
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.info(
+            "process_github_event.finished",
+            outcome=outcome,
+            duration_ms=duration_ms,
+        )
         sync_actions_total.labels(type=event_type, outcome=outcome).inc()
         sync_duration_seconds.labels(type=event_type).observe(
             time.perf_counter() - start
