@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +13,10 @@ from integration.models import WebhookEventLog, WebhookSource
 from main import app
 
 SECRET = "testsecret-plane"
+
+
+def _sign(body: bytes) -> str:
+    return hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
 class FakeSession:
@@ -78,7 +83,7 @@ def test_valid_secret_persists_and_enqueues(
 ) -> None:
     body = b'{"event":"card.created","data":{"id":"abc"}}'
     headers = {
-        "X-Plane-Signature": SECRET,
+        "X-Plane-Signature": _sign(body),
         "X-Plane-Event": "card.created",
         "Content-Type": "application/json",
     }
@@ -136,7 +141,7 @@ def test_duplicate_payload_within_window_returns_200_without_enqueue(
     )
     body = b'{"event":"card.updated"}'
     headers = {
-        "X-Plane-Signature": SECRET,
+        "X-Plane-Signature": _sign(body),
         "X-Plane-Event": "card.updated",
         "Content-Type": "application/json",
     }

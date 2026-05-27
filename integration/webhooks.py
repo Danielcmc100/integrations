@@ -24,10 +24,11 @@ def _verify_github_signature(secret: str, signature_header: str | None, body: by
     return hmac.compare_digest(expected, signature_header)
 
 
-def _verify_plane_secret(expected_secret: str, provided_secret: str | None) -> bool:
-    if not expected_secret or not provided_secret:
+def _verify_plane_signature(secret: str, signature_header: str | None, body: bytes) -> bool:
+    if not secret or not signature_header:
         return False
-    return hmac.compare_digest(expected_secret, provided_secret)
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header)
 
 
 @router.post("/github")
@@ -80,7 +81,7 @@ async def plane_webhook(
     x_plane_event: Annotated[str, Header()] = "unknown",
 ) -> dict[str, str]:
     body = await request.body()
-    if not _verify_plane_secret(settings.plane_webhook_secret, x_plane_signature):
+    if not _verify_plane_signature(settings.plane_webhook_secret, x_plane_signature, body):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
     webhooks_received_total.labels(source="plane").inc()
     payload_hash = hashlib.sha256(body).hexdigest()
