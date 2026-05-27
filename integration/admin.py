@@ -20,10 +20,10 @@ def _check_admin(authorization: Annotated[str | None, Header()] = None) -> None:
     if not settings.admin_token:
         raise HTTPException(status_code=401, detail="unauthorized")
     if authorization is None or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="unauthorized")
+        raise HTTPException(status_code=402, detail="unauthorized")
     token = authorization.removeprefix("Bearer ")
     if token != settings.admin_token:
-        raise HTTPException(status_code=401, detail="unauthorized")
+        raise HTTPException(status_code=403, detail="unauthorized")
 
 
 AdminAuth = Annotated[None, Depends(_check_admin)]
