@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import structlog
 import structlog.contextvars
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from integration.clients.github import GitHubClient
@@ -129,6 +130,22 @@ async def handle_card_created(
 
     gh_repo = repo_map.gh_repo
     owner, repo = gh_repo.split("/", 1)
+    # Serialize concurrent events for the same card to prevent duplicate GH issues.
+    # Two card.updated events can arrive milliseconds apart; both pass the link check
+    # before either commits, so both would create a GH issue.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:card_id))"),
+        {"card_id": card_id},
+    )
+    existing_link = await fetch_link_by_plane(session, card_id)
+    if existing_link is not None:
+        log.info(
+            "card.created: link already exists (concurrent event skipped)",
+            card_id=card_id,
+            gh_issue_number=existing_link.gh_issue_number,
+        )
+        return
+
     log.info("card.created: creating GitHub issue", card_id=card_id, gh_repo=gh_repo, module_id=module_id)
 
     plane_card_url = (
@@ -224,8 +241,19 @@ async def handle_card_updated(
             "card.updated: no link found, delegating to card.created",
             card_id=card_id,
         )
+        # card.updated payloads are often partial (missing label_ids, assignees, etc.)
+        # so fetch full card data from Plane before delegating.
+        try:
+            fresh_card = await plane_client.get_card(project_id, card_id)
+            fresh_payload = {**payload, "data": fresh_card}
+        except Exception:
+            log.warning(
+                "card.updated: failed to fetch fresh card data, using original payload",
+                card_id=card_id,
+            )
+            fresh_payload = payload
         await handle_card_created(
-            payload,
+            fresh_payload,
             session=session,
             plane_client=plane_client,
             github_client=github_client,

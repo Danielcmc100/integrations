@@ -30,6 +30,11 @@ class FakeSession:
     async def commit(self) -> None:
         self.commit_count += 1
 
+    async def execute(self, *args: Any, **kwargs: Any) -> MagicMock:
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
 
 def _make_repo_map(
     module_id: str = "mod-1",
