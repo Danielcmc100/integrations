@@ -87,7 +87,8 @@ class ConfigService:
 
     async def get_user_map_by_gh(self, gh_login: str) -> UserMap | None:
         await self._ensure_loaded()
+        gh_login_lower = gh_login.lower()
         for um in self._cache.user_maps:
-            if um.gh_login == gh_login:
+            if um.gh_login.lower() == gh_login_lower:
                 return um
         return None
