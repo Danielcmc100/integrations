@@ -118,6 +118,13 @@ def _make_discord_bot(
     return bot
 
 
+def _make_plane_client() -> MagicMock:
+    client = MagicMock()
+    client.list_states = AsyncMock(return_value=[])
+    client.update_card = AsyncMock()
+    return client
+
+
 def _make_github_client(
     *,
     required_contexts: list[str] | None = None,
@@ -446,6 +453,7 @@ def test_check_suite_completed_notifies_ready_pr() -> None:
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
         )
     )
@@ -470,6 +478,7 @@ def test_check_suite_completed_already_notified_no_repost() -> None:
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -490,6 +499,7 @@ def test_check_suite_completed_draft_pr_no_notify() -> None:
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -513,6 +523,7 @@ def test_check_suite_completed_missing_repo_noop() -> None:
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -533,6 +544,7 @@ def test_check_suite_completed_get_pr_fails_skips() -> None:
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 

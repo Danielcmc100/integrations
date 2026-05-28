@@ -20,6 +20,7 @@ from integration.clients.plane import PlaneClient
 from integration.config import settings
 from integration.config_service import ConfigService
 from integration.discord_bot import DiscordBotProtocol
+from integration.handlers._stage import apply_stage_trigger
 from integration.handlers._sync import (
     detect_conflict,
     event_wins_conflict,
@@ -31,7 +32,7 @@ from integration.handlers._sync import (
     strip_footer,
 )
 from integration.metrics import sync_actions_total, sync_duration_seconds
-from integration.models import CardIssueLink, PrNotificationState, SyncSource
+from integration.models import CardIssueLink, PrNotificationState, StageTrigger, SyncSource
 from integration.pr_ready import compute_ready
 from integration.retry import DeadLetteredError, run_with_retry
 
@@ -666,50 +667,53 @@ async def _check_and_notify(
     *,
     session: AsyncSession,
     github_client: GitHubClient,
-    discord_bot: DiscordBotProtocol,
+    discord_bot: DiscordBotProtocol | None,
     discord_channel_id: str,
     now_fn: Callable[[], datetime] = _utcnow,
     plane_app_url: str | None = None,
     plane_workspace: str | None = None,
-) -> None:
+) -> bool:
     if state.ready_notified_at is not None:
         log.info("pr_ready: already notified this cycle", pr_number=state.pr_number)
-        return
+        return True
 
     is_ready = await compute_ready(pr, github_client)
     if not is_ready:
         log.debug("pr_ready: not ready", pr_number=state.pr_number)
-        return
+        return False
 
-    plane_card_url: str | None = None
-    link = await fetch_link_by_gh(session, state.gh_repo, state.pr_number)
-    if link is not None:
-        ws = plane_workspace if plane_workspace is not None else settings.plane_workspace
-        app_url = plane_app_url if plane_app_url is not None else settings.plane_app_url
-        plane_card_url = (
-            f"{app_url.rstrip('/')}/{ws}/projects/"
-            f"{link.plane_project_id}/issues/{link.plane_card_id}/"
+    if discord_bot is not None:
+        plane_card_url: str | None = None
+        link = await fetch_link_by_gh(session, state.gh_repo, state.pr_number)
+        if link is not None:
+            ws = plane_workspace if plane_workspace is not None else settings.plane_workspace
+            app_url = plane_app_url if plane_app_url is not None else settings.plane_app_url
+            plane_card_url = (
+                f"{app_url.rstrip('/')}/{ws}/projects/"
+                f"{link.plane_project_id}/issues/{link.plane_card_id}/"
+            )
+
+        embed, view = _build_pr_embed(pr, plane_card_url=plane_card_url)
+        message_id = await discord_bot.post_review_message(
+            discord_channel_id, embed, view=view
         )
 
-    embed, view = _build_pr_embed(pr, plane_card_url=plane_card_url)
-    message_id = await discord_bot.post_review_message(
-        discord_channel_id, embed, view=view
-    )
+        title = str(pr.get("title") or "")
+        thread_name = f"PR #{state.pr_number} - {title[:80]}"
+        thread_id = await discord_bot.create_thread(message_id, discord_channel_id, thread_name)
 
-    title = str(pr.get("title") or "")
-    thread_name = f"PR #{state.pr_number} - {title[:80]}"
-    thread_id = await discord_bot.create_thread(message_id, discord_channel_id, thread_name)
+        state.ready_notified_at = now_fn()
+        state.discord_message_id = message_id
+        state.discord_thread_id = thread_id
+        await session.commit()
+        log.info(
+            "pr_ready: discord notification sent",
+            pr_number=state.pr_number,
+            message_id=message_id,
+            thread_id=thread_id,
+        )
 
-    state.ready_notified_at = now_fn()
-    state.discord_message_id = message_id
-    state.discord_thread_id = thread_id
-    await session.commit()
-    log.info(
-        "pr_ready: discord notification sent",
-        pr_number=state.pr_number,
-        message_id=message_id,
-        thread_id=thread_id,
-    )
+    return True
 
 
 async def handle_pr_notification(
@@ -769,8 +773,9 @@ async def handle_check_suite_completed(
     *,
     session: AsyncSession,
     github_client: GitHubClient,
-    discord_bot: DiscordBotProtocol,
+    discord_bot: DiscordBotProtocol | None,
     discord_channel_id: str,
+    plane_client: PlaneClient,
     now_fn: Callable[[], datetime] = _utcnow,
     plane_app_url: str | None = None,
     plane_workspace: str | None = None,
@@ -817,7 +822,7 @@ async def handle_check_suite_completed(
         state = await _upsert_pr_state(session, pr_node_id, gh_repo, pr_number)
         await session.commit()
 
-        await _check_and_notify(
+        is_ready = await _check_and_notify(
             pr,
             state,
             session=session,
@@ -828,6 +833,17 @@ async def handle_check_suite_completed(
             plane_app_url=plane_app_url,
             plane_workspace=plane_workspace,
         )
+
+        if is_ready:
+            link = await fetch_link_by_gh(session, gh_repo, pr_number)
+            if link is not None:
+                await apply_stage_trigger(
+                    link.plane_project_id,
+                    link.plane_card_id,
+                    StageTrigger.ci_passed,
+                    session=session,
+                    plane_client=plane_client,
+                )
 
 
 async def _fetch_pr_state(
@@ -843,7 +859,8 @@ async def handle_pr_review_submitted(
     payload: dict[str, Any],
     *,
     session: AsyncSession,
-    discord_bot: DiscordBotProtocol,
+    discord_bot: DiscordBotProtocol | None,
+    plane_client: PlaneClient,
 ) -> None:
     review_raw: Any = payload.get("review")
     review: dict[str, Any] = (
@@ -857,23 +874,54 @@ async def handle_pr_review_submitted(
         log.warning("pr_review_submitted: missing pr node_id")
         return
 
-    state = await _fetch_pr_state(session, pr_node_id)
-    if state is None or state.discord_thread_id is None:
-        log.info("pr_review_submitted: no discord thread", pr_node_id=pr_node_id)
-        return
+    review_state_val = str(review.get("state") or "").upper()
 
-    user_raw: Any = review.get("user") or {}
-    user: dict[str, Any] = cast("dict[str, Any]", user_raw) if isinstance(user_raw, dict) else {}
-    reviewer_login = str(user.get("login") or "")
-    review_state = str(review.get("state") or "")
-    body = str(review.get("body") or "")[:200]
+    if discord_bot is not None:
+        state = await _fetch_pr_state(session, pr_node_id)
+        if state is not None and state.discord_thread_id is not None:
+            user_raw: Any = review.get("user") or {}
+            user: dict[str, Any] = (
+                cast("dict[str, Any]", user_raw) if isinstance(user_raw, dict) else {}
+            )
+            reviewer_login = str(user.get("login") or "")
+            body = str(review.get("body") or "")[:200]
+            content = f"{review_state_val} by @{reviewer_login}"
+            if body:
+                content += f": {body}"
+            await discord_bot.post_thread_message(state.discord_thread_id, content)
+            log.info("pr_review_submitted: posted to thread", pr_number=state.pr_number)
 
-    content = f"{review_state} by @{reviewer_login}"
-    if body:
-        content += f": {body}"
+    trigger: StageTrigger | None = None
+    if review_state_val == "CHANGES_REQUESTED":
+        trigger = StageTrigger.changes_requested
+    elif review_state_val == "APPROVED":
+        trigger = StageTrigger.pr_approved
 
-    await discord_bot.post_thread_message(state.discord_thread_id, content)
-    log.info("pr_review_submitted: posted to thread", pr_number=state.pr_number)
+    if trigger is not None:
+        repo_raw: Any = payload.get("repository")
+        repo: dict[str, Any] = (
+            cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+        )
+        gh_repo = str(repo.get("full_name") or "")
+        head_raw: Any = pr.get("head")
+        head: dict[str, Any] = (
+            cast("dict[str, Any]", head_raw) if isinstance(head_raw, dict) else {}
+        )
+        branch = str(head.get("ref") or "")
+        issue_number: int | None = None
+        m = _BRANCH_NUM_RE.match(branch)
+        if m:
+            issue_number = int(m.group("num"))
+        if issue_number and gh_repo:
+            link = await fetch_link_by_gh(session, gh_repo, issue_number)
+            if link is not None:
+                await apply_stage_trigger(
+                    link.plane_project_id,
+                    link.plane_card_id,
+                    trigger,
+                    session=session,
+                    plane_client=plane_client,
+                )
 
 
 async def handle_pr_closed_discord(
@@ -922,6 +970,9 @@ def _gh_event_label(payload: dict[str, Any]) -> str:
         return f"issue_comment.{action}"
     if "issue" in payload:
         return f"issue.{action}"
+    ref_type = str(payload.get("ref_type") or "")
+    if ref_type:
+        return f"create.{ref_type}"
     return action or "unknown"
 
 
@@ -969,6 +1020,145 @@ async def handle_issue_deleted(
     )
 
 
+async def handle_branch_created(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+) -> None:
+    ref_type = str(payload.get("ref_type") or "")
+    if ref_type != "branch":
+        return
+
+    repo_raw: Any = payload.get("repository")
+    repo: dict[str, Any] = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    gh_repo = str(repo.get("full_name") or "")
+    if not gh_repo:
+        return
+
+    branch = str(payload.get("ref") or "")
+    m = _BRANCH_NUM_RE.match(branch)
+    if not m:
+        log.debug("branch_created: branch does not match pattern", branch=branch)
+        return
+
+    issue_number = int(m.group("num"))
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.info(
+            "branch_created: no link for issue",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+        )
+        return
+
+    await apply_stage_trigger(
+        link.plane_project_id,
+        link.plane_card_id,
+        StageTrigger.branch_created,
+        session=session,
+        plane_client=plane_client,
+    )
+
+
+async def handle_pr_plane_stage(
+    payload: dict[str, Any],
+    trigger: StageTrigger,
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw) if isinstance(pr_raw, dict) else {}
+    repo_raw: Any = payload.get("repository")
+    repo: dict[str, Any] = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    gh_repo = str(repo.get("full_name") or "")
+    if not gh_repo:
+        return
+
+    head_raw: Any = pr.get("head")
+    head: dict[str, Any] = cast("dict[str, Any]", head_raw) if isinstance(head_raw, dict) else {}
+    branch = str(head.get("ref") or "")
+
+    issue_number: int | None = None
+    m = _BRANCH_NUM_RE.match(branch)
+    if m:
+        issue_number = int(m.group("num"))
+    else:
+        pr_body = str(pr.get("body") or "")
+        closes_matches = list(_CLOSES_RE.finditer(pr_body))
+        if closes_matches:
+            issue_number = int(closes_matches[0].group(1))
+
+    if not issue_number:
+        log.debug("pr_plane_stage: no issue number resolved", trigger=trigger, branch=branch)
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.info(
+            "pr_plane_stage: no link",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+            trigger=trigger,
+        )
+        return
+
+    await apply_stage_trigger(
+        link.plane_project_id,
+        link.plane_card_id,
+        trigger,
+        session=session,
+        plane_client=plane_client,
+    )
+
+
+async def handle_pr_closed_unmerged(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw) if isinstance(pr_raw, dict) else {}
+
+    if bool(pr.get("merged")):
+        return  # handled by handle_pr_merged
+
+    repo_raw: Any = payload.get("repository")
+    repo: dict[str, Any] = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    gh_repo = str(repo.get("full_name") or "")
+    if not gh_repo:
+        return
+
+    head_raw: Any = pr.get("head")
+    head: dict[str, Any] = cast("dict[str, Any]", head_raw) if isinstance(head_raw, dict) else {}
+    branch = str(head.get("ref") or "")
+
+    m = _BRANCH_NUM_RE.match(branch)
+    if not m:
+        log.debug("pr_closed_unmerged: branch does not match pattern", branch=branch)
+        return
+
+    issue_number = int(m.group("num"))
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.info(
+            "pr_closed_unmerged: no link",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+        )
+        return
+
+    await apply_stage_trigger(
+        link.plane_project_id,
+        link.plane_card_id,
+        StageTrigger.pr_closed,
+        session=session,
+        plane_client=plane_client,
+    )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -986,7 +1176,14 @@ async def process_github_event(
     log.info("process_github_event.started")
 
     async def _dispatch() -> None:
-        if "issue" in payload and action == "opened":
+        if "ref_type" in payload and "pull_request" not in payload and "issue" not in payload:
+            async with ctx["session_factory"]() as session:
+                await handle_branch_created(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
+        elif "issue" in payload and action == "opened":
             async with ctx["session_factory"]() as session:
                 await handle_issue_opened(
                     payload,
@@ -1050,6 +1247,13 @@ async def process_github_event(
                         discord_bot=_db,
                         discord_channel_id=settings.discord_review_channel_id,
                     )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_plane_stage(
+                    payload,
+                    StageTrigger.pr_opened,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
         elif "pull_request" in payload and action == "reopened":
             _db = ctx.get("discord_bot")
             if _db is not None:
@@ -1062,26 +1266,31 @@ async def process_github_event(
                         discord_channel_id=settings.discord_review_channel_id,
                         new_cycle=True,
                     )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_plane_stage(
+                    payload,
+                    StageTrigger.pr_opened,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
         elif "check_suite" in payload and action == "completed":
-            _db = ctx.get("discord_bot")
-            if _db is not None:
-                async with ctx["session_factory"]() as session:
-                    await handle_check_suite_completed(
-                        payload,
-                        session=session,
-                        github_client=ctx["github_client"],
-                        discord_bot=_db,
-                        discord_channel_id=settings.discord_review_channel_id,
-                    )
+            async with ctx["session_factory"]() as session:
+                await handle_check_suite_completed(
+                    payload,
+                    session=session,
+                    github_client=ctx["github_client"],
+                    discord_bot=ctx.get("discord_bot"),
+                    discord_channel_id=settings.discord_review_channel_id,
+                    plane_client=ctx["plane_client"],
+                )
         elif "review" in payload and action == "submitted":
-            _db = ctx.get("discord_bot")
-            if _db is not None:
-                async with ctx["session_factory"]() as session:
-                    await handle_pr_review_submitted(
-                        payload,
-                        session=session,
-                        discord_bot=_db,
-                    )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_review_submitted(
+                    payload,
+                    session=session,
+                    discord_bot=ctx.get("discord_bot"),
+                    plane_client=ctx["plane_client"],
+                )
         elif "pull_request" in payload and action == "closed":
             async with ctx["session_factory"]() as session:
                 await handle_pr_merged(
@@ -1089,6 +1298,12 @@ async def process_github_event(
                     session=session,
                     plane_client=ctx["plane_client"],
                     config_service=ctx["config_service"],
+                )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_closed_unmerged(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
                 )
             _db = ctx.get("discord_bot")
             if _db is not None:

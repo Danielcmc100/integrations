@@ -29,6 +29,7 @@ PostgreSQL
 ├── label_map               — GitHub label ↔ Plane label
 ├── user_map                — GitHub login ↔ Plane user ↔ Discord user
 ├── pr_notification_state   — Discord notification dedup per PR
+├── stage_map               — GitHub trigger → Plane state name (per project)
 └── dead_letter             — permanent failures after 5 retries
 ```
 
@@ -52,7 +53,7 @@ Create a GitHub App with permissions:
 - **Checks**: Read
 - **Metadata**: Read
 
-Subscribe to events: `issues`, `issue_comment`, `pull_request`, `pull_request_review`, `check_suite`.
+Subscribe to events: `issues`, `issue_comment`, `pull_request`, `pull_request_review`, `check_suite`, `create`.
 
 After creating, install the app on target repos and note the **Installation ID**.
 
@@ -184,6 +185,14 @@ Matching uses title first, then footer cross-references. Idempotent — safe to 
 | PR unreviewed > 24h | Hourly reminder in Discord thread |
 | Plane card deleted | Delete linked GitHub issue (GraphQL `deleteIssue`) |
 | GitHub issue deleted | Delete linked Plane card |
+| Branch `<num>-*` pushed | Move linked Plane card to configured stage (`branch_created` trigger) |
+| PR opened / ready_for_review / reopened | Move linked Plane card to configured stage (`pr_opened` trigger) |
+| PR becomes ready (CI green, not draft) | Move linked Plane card to configured stage (`ci_passed` trigger) |
+| PR review → CHANGES_REQUESTED | Move linked Plane card to configured stage (`changes_requested` trigger) |
+| PR review → APPROVED | Move linked Plane card to configured stage (`pr_approved` trigger) |
+| PR closed without merge | Move linked Plane card to configured stage (`pr_closed` trigger) |
+
+Stage triggers are optional per project — absent row = no action. Configure via `POST /admin/stage-maps` or the Admin UI → Stage Maps tab.
 
 ## Linking a PR to a Plane card
 

@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from integration.config import settings
 from integration.deps import ConfigServiceDep, GitHubClientDep, PlaneClientDep, SessionDep
-from integration.models import LabelMap, RepoModuleMap, UserMap
+from integration.models import LabelMap, RepoModuleMap, StageMap, StageTrigger, UserMap
 
 log = structlog.get_logger()
 
@@ -280,6 +281,126 @@ async def delete_user(
     config_service.invalidate()
 
 
+# --- /admin/stage-maps ---
+
+
+class StageMapIn(BaseModel):
+    plane_project_id: str
+    trigger: StageTrigger
+    plane_state_name: str
+
+
+class StageMapUpdate(BaseModel):
+    plane_state_name: str
+
+
+class StageMapOut(BaseModel):
+    id: int
+    plane_project_id: str
+    trigger: StageTrigger
+    plane_state_name: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/stage-maps", response_model=list[StageMapOut])
+async def list_stage_maps(_auth: AdminAuth, session: SessionDep) -> list[StageMap]:
+    result = await session.execute(select(StageMap))
+    return list(result.scalars())
+
+
+@router.get("/stage-maps/project/{plane_project_id}", response_model=list[StageMapOut])
+async def list_stage_maps_by_project(
+    plane_project_id: str,
+    _auth: AdminAuth,
+    session: SessionDep,
+) -> list[StageMap]:
+    result = await session.execute(
+        select(StageMap).where(StageMap.plane_project_id == plane_project_id)
+    )
+    return list(result.scalars())
+
+
+@router.post("/stage-maps", response_model=StageMapOut, status_code=201)
+async def create_stage_map(
+    body: StageMapIn,
+    _auth: AdminAuth,
+    session: SessionDep,
+) -> StageMap:
+    row = StageMap(
+        plane_project_id=body.plane_project_id,
+        trigger=body.trigger,
+        plane_state_name=body.plane_state_name,
+    )
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="stage map for this project/trigger already exists",
+        ) from None
+    return row
+
+
+@router.post("/stage-maps/batch", response_model=list[StageMapOut], status_code=201)
+async def batch_upsert_stage_maps(
+    body: list[StageMapIn],
+    _auth: AdminAuth,
+    session: SessionDep,
+) -> list[StageMap]:
+    rows: list[StageMap] = []
+    for item in body:
+        result = await session.execute(
+            select(StageMap).where(
+                StageMap.plane_project_id == item.plane_project_id,
+                StageMap.trigger == item.trigger,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            row = StageMap(
+                plane_project_id=item.plane_project_id,
+                trigger=item.trigger,
+                plane_state_name=item.plane_state_name,
+            )
+            session.add(row)
+        else:
+            row.plane_state_name = item.plane_state_name
+        rows.append(row)
+    await session.commit()
+    return rows
+
+
+@router.put("/stage-maps/{stage_map_id}", response_model=StageMapOut)
+async def update_stage_map(
+    stage_map_id: int,
+    body: StageMapUpdate,
+    _auth: AdminAuth,
+    session: SessionDep,
+) -> StageMap:
+    row = await session.get(StageMap, stage_map_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    row.plane_state_name = body.plane_state_name
+    await session.commit()
+    return row
+
+
+@router.delete("/stage-maps/{stage_map_id}", status_code=204)
+async def delete_stage_map(
+    stage_map_id: int,
+    _auth: AdminAuth,
+    session: SessionDep,
+) -> None:
+    row = await session.get(StageMap, stage_map_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    await session.delete(row)
+    await session.commit()
+
+
 # --- /admin/plane/* proxy ---
 
 
@@ -316,6 +437,15 @@ async def proxy_plane_members(
     plane: PlaneClientDep,
 ) -> list[dict[str, Any]]:
     return await plane.list_project_members(project_id)
+
+
+@router.get("/plane/projects/{project_id}/states")
+async def proxy_plane_states(
+    project_id: str,
+    _auth: AdminAuth,
+    plane: PlaneClientDep,
+) -> list[dict[str, Any]]:
+    return await plane.list_states(project_id)
 
 
 # --- /admin/github/* proxy ---

@@ -33,6 +33,15 @@ class WebhookStatus(enum.StrEnum):
     failed = "failed"
 
 
+class StageTrigger(enum.StrEnum):
+    branch_created = "branch_created"
+    pr_opened = "pr_opened"
+    ci_passed = "ci_passed"
+    changes_requested = "changes_requested"
+    pr_approved = "pr_approved"
+    pr_closed = "pr_closed"
+
+
 class CardIssueLink(Base):
     __tablename__ = "card_issue_link"
     __table_args__ = (
@@ -109,6 +118,20 @@ class DeadLetter(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class StageMap(Base):
+    __tablename__ = "stage_map"
+    __table_args__ = (
+        UniqueConstraint("plane_project_id", "trigger", name="uq_stage_map_project_trigger"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plane_project_id: Mapped[str] = mapped_column(String, nullable=False)
+    trigger: Mapped[StageTrigger] = mapped_column(
+        Enum(StageTrigger, name="stage_trigger"), nullable=False
+    )
+    plane_state_name: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class WebhookEventLog(Base):

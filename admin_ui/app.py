@@ -57,6 +57,10 @@ def plane_labels(project_id: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/labels")
 
 
+def plane_states(project_id: str) -> list[dict[str, Any]]:
+    return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/states")
+
+
 def plane_modules(project_id: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/modules")
 
@@ -154,6 +158,10 @@ def _member_opts(members: list[dict[str, Any]]) -> dict[str, str]:
 
 def _gh_label_names(labels: list[dict[str, Any]]) -> list[str]:
     return [lb["name"] for lb in labels if "name" in lb]
+
+
+def _state_name_opts(states: list[dict[str, Any]]) -> list[str]:
+    return [str(s["name"]) for s in states if "name" in s]
 
 
 def _collab_logins(collabs: list[dict[str, Any]]) -> list[str]:
@@ -565,9 +573,111 @@ def render_modules_tab() -> None:
         st.error(f"Failed to load mappings: {exc}")
 
 
+# ── STAGE MAPS TAB ───────────────────────────────────────────────────────────
+
+_TRIGGER_LABELS: dict[str, str] = {
+    "branch_created": "Branch created",
+    "pr_opened": "PR opened / ready / reopened",
+    "ci_passed": "CI passed (PR ready)",
+    "changes_requested": "Changes requested (review)",
+    "pr_approved": "PR approved (review)",
+    "pr_closed": "PR closed without merge",
+}
+
+
+def render_stage_maps_tab() -> None:
+    st.subheader("Map GitHub trigger → Plane stage")
+
+    projects = _load_projects()
+    proj_opts = _project_opts(projects)
+
+    col1, col2 = st.columns(2)
+    plane_proj_id = ""
+    selected_trigger = ""
+    selected_state_name = ""
+
+    with col1:
+        st.markdown("**Plane project & trigger**")
+        plane_proj_name = st.selectbox(
+            "Project", options=["", *proj_opts.keys()], key="sm_plane_proj"
+        )
+        plane_proj_id = proj_opts.get(plane_proj_name, "") if plane_proj_name else ""
+
+        trigger_label = st.selectbox(
+            "Trigger",
+            options=["", *_TRIGGER_LABELS.values()],
+            key="sm_trigger",
+        )
+        selected_trigger = (
+            next((k for k, v in _TRIGGER_LABELS.items() if v == trigger_label), "")
+            if trigger_label
+            else ""
+        )
+
+    with col2:
+        st.markdown("**Target Plane state**")
+        if plane_proj_id:
+            try:
+                states = plane_states(plane_proj_id)
+                state_names = _state_name_opts(states)
+            except Exception as exc:
+                st.error(f"Failed to load Plane states: {exc}")
+                state_names = []
+            selected_state_name = (
+                st.selectbox("State", options=["", *state_names], key="sm_state") or ""
+            )
+        else:
+            st.selectbox("State", options=[""], key="sm_state_off", disabled=True)
+
+    if st.button("Map stage", type="primary", key="sm_map_btn"):
+        if not all([plane_proj_id, selected_trigger, selected_state_name]):
+            st.warning("Select project, trigger, and target state before mapping.")
+        else:
+            try:
+                admin_post(
+                    "/admin/stage-maps",
+                    {
+                        "plane_project_id": plane_proj_id,
+                        "trigger": selected_trigger,
+                        "plane_state_name": selected_state_name,
+                    },
+                )
+                st.success("Mapping created.")
+                st.rerun()
+            except Exception as exc:
+                if "409" in str(exc):
+                    st.error(
+                        "Mapping already exists for this project/trigger. "
+                        "Delete the existing one first."
+                    )
+                else:
+                    st.error(f"Failed: {exc}")
+
+    st.divider()
+    st.subheader("Existing stage mappings")
+    try:
+        existing = admin_get("/admin/stage-maps")
+        if existing:
+            proj_names = _project_name_map()
+            _table_header("Project", "Trigger", "Target state")
+            for row in existing:
+                cols = st.columns([3, 3, 3, 1])
+                proj_id_val = row.get("plane_project_id", "")
+                cols[0].text(proj_names.get(proj_id_val, proj_id_val[:16]))
+                cols[1].text(_TRIGGER_LABELS.get(row.get("trigger", ""), row.get("trigger", "")))
+                cols[2].text(row.get("plane_state_name", ""))
+                _delete_row(cols, f"/admin/stage-maps/{row['id']}", f"sm_{row['id']}")
+        else:
+            st.info("No stage mappings yet.")
+    except Exception as exc:
+        st.error(f"Failed to load mappings: {exc}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-tab_labels, tab_users, tab_modules = st.tabs(["Labels", "Users", "Modules"])
+tab_labels, tab_users, tab_modules, tab_stage_maps = st.tabs(
+    ["Labels", "Users", "Modules", "Stage Maps"]
+)
 
 with tab_labels:
     render_labels_tab()
@@ -577,3 +687,6 @@ with tab_users:
 
 with tab_modules:
     render_modules_tab()
+
+with tab_stage_maps:
+    render_stage_maps_tab()

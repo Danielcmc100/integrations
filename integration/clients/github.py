@@ -127,14 +127,10 @@ class GitHubClient:
         return _as_json_dict(response)
 
     async def create_issue(self, owner: str, repo: str, payload: JsonDict) -> JsonDict:
-        response = await self._request(
-            "POST", f"/repos/{owner}/{repo}/issues", json=payload
-        )
+        response = await self._request("POST", f"/repos/{owner}/{repo}/issues", json=payload)
         return _as_json_dict(response)
 
-    async def update_issue(
-        self, owner: str, repo: str, number: int, payload: JsonDict
-    ) -> JsonDict:
+    async def update_issue(self, owner: str, repo: str, number: int, payload: JsonDict) -> JsonDict:
         response = await self._request(
             "PATCH", f"/repos/{owner}/{repo}/issues/{number}", json=payload
         )
@@ -148,9 +144,7 @@ class GitHubClient:
             payload["state_reason"] = state_reason
         return await self.update_issue(owner, repo, number, payload)
 
-    async def create_comment(
-        self, owner: str, repo: str, number: int, body: str
-    ) -> JsonDict:
+    async def create_comment(self, owner: str, repo: str, number: int, body: str) -> JsonDict:
         response = await self._request(
             "POST",
             f"/repos/{owner}/{repo}/issues/{number}/comments",
@@ -175,12 +169,8 @@ class GitHubClient:
         response = await self._request("GET", f"/repos/{owner}/{repo}/pulls/{number}")
         return _as_json_dict(response)
 
-    async def list_check_runs(
-        self, owner: str, repo: str, ref: str
-    ) -> list[JsonDict]:
-        response = await self._request(
-            "GET", f"/repos/{owner}/{repo}/commits/{ref}/check-runs"
-        )
+    async def list_check_runs(self, owner: str, repo: str, ref: str) -> list[JsonDict]:
+        response = await self._request("GET", f"/repos/{owner}/{repo}/commits/{ref}/check-runs")
         raw: Any = response.json()
         if not isinstance(raw, dict):
             raise ValueError("expected object with check_runs")
@@ -190,20 +180,14 @@ class GitHubClient:
             raise ValueError("check_runs not an array")
         return [cast(JsonDict, r) for r in cast("list[Any]", runs) if isinstance(r, dict)]
 
-    async def list_reviews(
-        self, owner: str, repo: str, number: int
-    ) -> list[JsonDict]:
-        response = await self._request(
-            "GET", f"/repos/{owner}/{repo}/pulls/{number}/reviews"
-        )
+    async def list_reviews(self, owner: str, repo: str, number: int) -> list[JsonDict]:
+        response = await self._request("GET", f"/repos/{owner}/{repo}/pulls/{number}/reviews")
         raw: Any = response.json()
         if not isinstance(raw, list):
             raise ValueError("expected array from list_reviews")
         return [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
 
-    async def list_issues(
-        self, owner: str, repo: str, *, state: str = "open"
-    ) -> list[JsonDict]:
+    async def list_issues(self, owner: str, repo: str, *, state: str = "open") -> list[JsonDict]:
         all_issues: list[JsonDict] = []
         page = 1
         while True:
@@ -215,9 +199,7 @@ class GitHubClient:
             raw: Any = response.json()
             if not isinstance(raw, list):
                 break
-            batch = [
-                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
-            ]
+            batch = [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
             all_issues.extend(batch)
             if len(batch) < 100:
                 break
@@ -245,12 +227,8 @@ class GitHubClient:
             if errors:
                 raise RuntimeError(f"GraphQL deleteIssue failed: {errors}")
 
-    async def get_branch_protection(
-        self, owner: str, repo: str, branch: str
-    ) -> JsonDict:
-        response = await self._request(
-            "GET", f"/repos/{owner}/{repo}/branches/{branch}/protection"
-        )
+    async def get_branch_protection(self, owner: str, repo: str, branch: str) -> JsonDict:
+        response = await self._request("GET", f"/repos/{owner}/{repo}/branches/{branch}/protection")
         return _as_json_dict(response)
 
     async def list_repos(self) -> list[JsonDict]:
@@ -269,9 +247,7 @@ class GitHubClient:
             raw_repos: Any = data.get("repositories", [])
             if not isinstance(raw_repos, list):
                 break
-            batch = [
-                cast(JsonDict, r) for r in cast("list[Any]", raw_repos) if isinstance(r, dict)
-            ]
+            batch = [cast(JsonDict, r) for r in cast("list[Any]", raw_repos) if isinstance(r, dict)]
             all_repos.extend(batch)
             if len(batch) < 100:
                 break
@@ -290,9 +266,7 @@ class GitHubClient:
             raw: Any = response.json()
             if not isinstance(raw, list):
                 break
-            batch = [
-                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
-            ]
+            batch = [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
             all_labels.extend(batch)
             if len(batch) < 100:
                 break
@@ -311,9 +285,7 @@ class GitHubClient:
             raw: Any = response.json()
             if not isinstance(raw, list):
                 break
-            batch = [
-                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
-            ]
+            batch = [cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)]
             all_collabs.extend(batch)
             if len(batch) < 100:
                 break
@@ -324,10 +296,7 @@ class GitHubClient:
 def _is_rate_limited(response: httpx.Response) -> bool:
     if response.status_code == 429:
         return True
-    return (
-        response.status_code == 403
-        and response.headers.get("X-RateLimit-Remaining") == "0"
-    )
+    return response.status_code == 403 and response.headers.get("X-RateLimit-Remaining") == "0"
 
 
 def _rate_limit_delay(response: httpx.Response, time_fn: TimeFn) -> float:

@@ -99,6 +99,13 @@ def _make_pr(
     }
 
 
+def _make_plane_client() -> MagicMock:
+    client = MagicMock()
+    client.list_states = AsyncMock(return_value=[])
+    client.update_card = AsyncMock()
+    return client
+
+
 def _make_discord_bot() -> MagicMock:
     bot = MagicMock()
     bot.post_review_message = AsyncMock(return_value=DISCORD_MSG_ID)
@@ -224,6 +231,7 @@ def test_review_submitted_posts_to_thread() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -245,6 +253,7 @@ def test_review_submitted_thread_id_correct() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -264,6 +273,7 @@ def test_review_submitted_body_truncated_to_200() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -283,6 +293,7 @@ def test_review_submitted_no_thread_noop() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -299,6 +310,7 @@ def test_review_submitted_no_state_noop() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
@@ -319,6 +331,7 @@ def test_review_submitted_missing_node_id_noop() -> None:
             payload,
             session=session,  # type: ignore[arg-type]
             discord_bot=discord_bot,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
