@@ -135,9 +135,34 @@ async def handle_card_created(
         f"{app_url.rstrip('/')}/{ws}/projects/{project_id}/issues/{card_id}/"
     )
     issue_body = f"{card_description}\n\n---\nPlane: {plane_card_url}"
-    gh_issue = await github_client.create_issue(
-        owner, repo, {"title": card_name, "body": issue_body}
-    )
+
+    gh_labels: list[str] = []
+    label_ids_raw: Any = data.get("label_ids")
+    if isinstance(label_ids_raw, list):
+        for lid in cast("list[Any]", label_ids_raw):
+            lm = await config_service.get_label_map(project_id, str(lid))
+            if lm is None:
+                log.info("card.created: unknown Plane label skipped", label_id=lid)
+            else:
+                gh_labels.append(lm.gh_label)
+
+    gh_assignees: list[str] = []
+    assignees_raw: Any = data.get("assignees")
+    if isinstance(assignees_raw, list):
+        for uid in cast("list[Any]", assignees_raw):
+            um = await config_service.get_user_map(str(uid))
+            if um is None:
+                log.info("card.created: unknown Plane user skipped", user_id=uid)
+            else:
+                gh_assignees.append(um.gh_login)
+
+    issue_payload: dict[str, Any] = {"title": card_name, "body": issue_body}
+    if gh_labels:
+        issue_payload["labels"] = gh_labels
+    if gh_assignees:
+        issue_payload["assignees"] = gh_assignees
+
+    gh_issue = await github_client.create_issue(owner, repo, issue_payload)
     gh_issue_number: int = int(gh_issue["number"])
     gh_issue_node_id: str = str(gh_issue["node_id"])
     gh_issue_url: str = str(gh_issue["html_url"])
