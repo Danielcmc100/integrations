@@ -1,4 +1,5 @@
 import os
+from typing import Any, cast
 
 import requests
 import streamlit as st
@@ -38,41 +39,41 @@ if not TOKEN:
 
 
 @st.cache_data(ttl=60)
-def _fetch(token: str, base: str, path: str) -> list[dict]:  # type: ignore[type-arg]
+def _fetch(token: str, base: str, path: str) -> list[dict[str, Any]]:
     r = requests.get(
         f"{base}{path}",
         headers={"Authorization": f"Bearer {token}"},
         timeout=20,
     )
     r.raise_for_status()
-    return r.json()  # type: ignore[no-any-return]
+    return cast(list[dict[str, Any]], r.json())
 
 
-def plane_projects() -> list[dict]:  # type: ignore[type-arg]
+def plane_projects() -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, "/admin/plane/projects")
 
 
-def plane_labels(project_id: str) -> list[dict]:  # type: ignore[type-arg]
+def plane_labels(project_id: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/labels")
 
 
-def plane_modules(project_id: str) -> list[dict]:  # type: ignore[type-arg]
+def plane_modules(project_id: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/modules")
 
 
-def plane_members(project_id: str) -> list[dict]:  # type: ignore[type-arg]
+def plane_members(project_id: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/plane/projects/{project_id}/members")
 
 
-def github_repos() -> list[dict]:  # type: ignore[type-arg]
+def github_repos() -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, "/admin/github/repos")
 
 
-def github_labels(owner: str, repo: str) -> list[dict]:  # type: ignore[type-arg]
+def github_labels(owner: str, repo: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/github/repos/{owner}/{repo}/labels")
 
 
-def github_collaborators(owner: str, repo: str) -> list[dict]:  # type: ignore[type-arg]
+def github_collaborators(owner: str, repo: str) -> list[dict[str, Any]]:
     return _fetch(TOKEN, BASE, f"/admin/github/repos/{owner}/{repo}/collaborators")
 
 
@@ -83,16 +84,16 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
-def admin_get(path: str) -> list[dict]:  # type: ignore[type-arg]
+def admin_get(path: str) -> list[dict[str, Any]]:
     r = requests.get(f"{BASE}{path}", headers=_headers(), timeout=15)
     if r.status_code == 401:
         st.error("Invalid token.")
         st.stop()
     r.raise_for_status()
-    return r.json()  # type: ignore[no-any-return]
+    return cast(list[dict[str, Any]], r.json())
 
 
-def admin_post(path: str, body: dict) -> None:  # type: ignore[type-arg]
+def admin_post(path: str, body: dict[str, Any]) -> None:
     r = requests.post(f"{BASE}{path}", json=body, headers=_headers(), timeout=15)
     if r.status_code == 401:
         st.error("Invalid token.")
@@ -111,22 +112,22 @@ def admin_delete(path: str) -> None:
 # ── Option-list helpers ───────────────────────────────────────────────────────
 
 
-def _project_opts(projects: list[dict]) -> dict[str, str]:  # type: ignore[type-arg]
+def _project_opts(projects: list[dict[str, Any]]) -> dict[str, str]:
     """name → id"""
     return {p.get("name", p.get("id", "?")): p["id"] for p in projects if "id" in p}
 
 
-def _label_opts(labels: list[dict]) -> dict[str, str]:  # type: ignore[type-arg]
+def _label_opts(labels: list[dict[str, Any]]) -> dict[str, str]:
     """name → id"""
     return {lb.get("name", lb.get("id", "?")): lb["id"] for lb in labels if "id" in lb}
 
 
-def _module_opts(modules: list[dict]) -> dict[str, str]:  # type: ignore[type-arg]
+def _module_opts(modules: list[dict[str, Any]]) -> dict[str, str]:
     """name → id"""
     return {m.get("name", m.get("id", "?")): m["id"] for m in modules if "id" in m}
 
 
-def _member_opts(members: list[dict]) -> dict[str, str]:  # type: ignore[type-arg]
+def _member_opts(members: list[dict[str, Any]]) -> dict[str, str]:
     """display → user_id
 
     Plane /members/ may return [{member: {id, display_name}}, ...]
@@ -151,22 +152,100 @@ def _member_opts(members: list[dict]) -> dict[str, str]:  # type: ignore[type-ar
     return result
 
 
-def _gh_label_names(labels: list[dict]) -> list[str]:  # type: ignore[type-arg]
+def _gh_label_names(labels: list[dict[str, Any]]) -> list[str]:
     return [lb["name"] for lb in labels if "name" in lb]
 
 
-def _collab_logins(collabs: list[dict]) -> list[str]:  # type: ignore[type-arg]
+def _collab_logins(collabs: list[dict[str, Any]]) -> list[str]:
     return [c["login"] for c in collabs if "login" in c]
 
 
-def _repo_full_names(repos: list[dict]) -> list[str]:  # type: ignore[type-arg]
+def _repo_full_names(repos: list[dict[str, Any]]) -> list[str]:
     return [r["full_name"] for r in repos if "full_name" in r]
+
+
+# ── Name-lookup builders (use cached fetchers, so no extra API calls) ─────────
+
+
+def _label_name_map(existing: list[dict[str, Any]]) -> dict[str, str]:
+    """plane_label_id → label name, fetching per unique project in existing rows."""
+    result: dict[str, str] = {}
+    seen: set[str] = set()
+    for row in existing:
+        proj_id = row.get("plane_project_id", "")
+        if not proj_id or proj_id in seen:
+            continue
+        seen.add(proj_id)
+        try:
+            for lb in plane_labels(proj_id):
+                if "id" in lb and "name" in lb:
+                    result[str(lb["id"])] = str(lb["name"])
+        except Exception:
+            pass
+    return result
+
+
+def _user_name_map() -> dict[str, str]:
+    """plane_user_id → display name, searching across all projects."""
+    result: dict[str, str] = {}
+    try:
+        for proj in plane_projects():
+            proj_id = proj.get("id", "")
+            if not proj_id:
+                continue
+            try:
+                for m in plane_members(str(proj_id)):
+                    nested = m.get("member")
+                    if isinstance(nested, dict):
+                        uid = str(nested.get("id", ""))
+                        name = str(nested.get("display_name") or nested.get("email") or uid)
+                    else:
+                        uid = str(m.get("member__id") or m.get("id", ""))
+                        name = str(
+                            m.get("member__display_name")
+                            or m.get("display_name")
+                            or m.get("member__email")
+                            or uid
+                        )
+                    if uid and uid not in result:
+                        result[uid] = name
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return result
+
+
+def _module_name_map(existing: list[dict[str, Any]]) -> dict[str, str]:
+    """plane_module_id → module name, fetching per unique project in existing rows."""
+    result: dict[str, str] = {}
+    seen: set[str] = set()
+    for row in existing:
+        proj_id = row.get("plane_project_id", "")
+        if not proj_id or proj_id in seen:
+            continue
+        seen.add(proj_id)
+        try:
+            for m in plane_modules(str(proj_id)):
+                if "id" in m and "name" in m:
+                    result[str(m["id"])] = str(m["name"])
+        except Exception:
+            pass
+    return result
+
+
+def _project_name_map() -> dict[str, str]:
+    """plane_project_id → project name."""
+    try:
+        return {str(p["id"]): str(p.get("name", p["id"])) for p in plane_projects() if "id" in p}
+    except Exception:
+        return {}
 
 
 # ── Shared loaders ────────────────────────────────────────────────────────────
 
 
-def _load_projects() -> list[dict]:  # type: ignore[type-arg]
+def _load_projects() -> list[dict[str, Any]]:
     try:
         return plane_projects()
     except Exception as exc:
@@ -174,7 +253,7 @@ def _load_projects() -> list[dict]:  # type: ignore[type-arg]
         return []
 
 
-def _load_gh_repos() -> list[dict]:  # type: ignore[type-arg]
+def _load_gh_repos() -> list[dict[str, Any]]:
     try:
         return github_repos()
     except Exception as exc:
@@ -193,7 +272,7 @@ def _table_header(*labels: str) -> None:
 
 
 def _delete_row(
-    cols: list,  # type: ignore[type-arg]
+    cols: list[Any],
     delete_path: str,
     row_key: str,
 ) -> None:
@@ -246,9 +325,7 @@ def render_labels_tab() -> None:
     with col2:
         st.markdown("**GitHub**")
         repo_names = _repo_full_names(repos)
-        gh_repo = (
-            st.selectbox("Repository", options=["", *repo_names], key="lbl_gh_repo") or ""
-        )
+        gh_repo = st.selectbox("Repository", options=["", *repo_names], key="lbl_gh_repo") or ""
 
         if gh_repo:
             owner, repo_name = gh_repo.split("/", 1)
@@ -292,13 +369,15 @@ def render_labels_tab() -> None:
     try:
         existing = admin_get("/admin/labels")
         if existing:
-            _table_header("Plane project", "Plane label ID", "GH repo", "GH label")
+            names = _label_name_map(existing)
+            _table_header("Plane project", "Plane label ID", "Plane label", "GH repo", "GH label")
             for row in existing:
-                cols = st.columns([3, 3, 3, 3, 1])
+                cols = st.columns([3, 3, 3, 3, 3, 1])
                 cols[0].text(row.get("plane_project_id", "")[:16])
                 cols[1].text(row.get("plane_label_id", "")[:16])
-                cols[2].text(row.get("gh_repo", ""))
-                cols[3].text(row.get("gh_label", ""))
+                cols[2].text(names.get(row.get("plane_label_id", ""), "—"))
+                cols[3].text(row.get("gh_repo", ""))
+                cols[4].text(row.get("gh_label", ""))
                 _delete_row(cols, f"/admin/labels/{row['id']}", f"lbl_{row['id']}")
         else:
             st.info("No label mappings yet.")
@@ -344,9 +423,7 @@ def render_users_tab() -> None:
     with col2:
         st.markdown("**GitHub**")
         repo_names = _repo_full_names(repos)
-        gh_repo = (
-            st.selectbox("Repository", options=["", *repo_names], key="usr_gh_repo") or ""
-        )
+        gh_repo = st.selectbox("Repository", options=["", *repo_names], key="usr_gh_repo") or ""
 
         if gh_repo:
             owner, repo_name = gh_repo.split("/", 1)
@@ -391,12 +468,14 @@ def render_users_tab() -> None:
     try:
         existing = admin_get("/admin/users")
         if existing:
-            _table_header("Plane user ID", "GitHub login", "Discord user ID")
+            names = _user_name_map()
+            _table_header("Plane user ID", "Plane user", "GitHub login", "Discord user ID")
             for row in existing:
-                cols = st.columns([3, 3, 3, 1])
+                cols = st.columns([3, 3, 3, 3, 1])
                 cols[0].text(row.get("plane_user_id", "")[:16])
-                cols[1].text(row.get("gh_login", ""))
-                cols[2].text(row.get("discord_user_id") or "—")
+                cols[1].text(names.get(row.get("plane_user_id", ""), "—"))
+                cols[2].text(row.get("gh_login", ""))
+                cols[3].text(row.get("discord_user_id") or "—")
                 _delete_row(cols, f"/admin/users/{row['id']}", f"usr_{row['id']}")
         else:
             st.info("No user mappings yet.")
@@ -433,9 +512,7 @@ def render_modules_tab() -> None:
                 st.error(f"Failed to load Plane modules: {exc}")
                 mods = []
             mod_opts = _module_opts(mods)
-            mod_name = st.selectbox(
-                "Module", options=["", *mod_opts.keys()], key="mod_plane_mod"
-            )
+            mod_name = st.selectbox("Module", options=["", *mod_opts.keys()], key="mod_plane_mod")
             plane_module_id = mod_opts.get(mod_name, "") if mod_name else ""
         else:
             st.selectbox("Module", options=[""], key="mod_plane_mod_off", disabled=True)
@@ -443,9 +520,7 @@ def render_modules_tab() -> None:
     with col2:
         st.markdown("**GitHub**")
         repo_names = _repo_full_names(repos)
-        gh_repo_m = (
-            st.selectbox("Repository", options=["", *repo_names], key="mod_gh_repo") or ""
-        )
+        gh_repo_m = st.selectbox("Repository", options=["", *repo_names], key="mod_gh_repo") or ""
 
     if st.button("Map module", type="primary", key="mod_map_btn"):
         if not all([plane_module_id, plane_proj_id_m, gh_repo_m]):
@@ -470,12 +545,15 @@ def render_modules_tab() -> None:
     try:
         existing = admin_get("/admin/repo-modules")
         if existing:
-            _table_header("Plane module ID", "Plane project ID", "GitHub repo")
+            mod_names = _module_name_map(existing)
+            proj_names = _project_name_map()
+            _table_header("Plane module ID", "Plane module", "Plane project", "GitHub repo")
             for row in existing:
-                cols = st.columns([3, 3, 3, 1])
+                cols = st.columns([3, 3, 3, 3, 1])
                 cols[0].text(row.get("plane_module_id", "")[:16])
-                cols[1].text(row.get("plane_project_id", "")[:16])
-                cols[2].text(row.get("gh_repo", ""))
+                cols[1].text(mod_names.get(row.get("plane_module_id", ""), "—"))
+                cols[2].text(proj_names.get(row.get("plane_project_id", ""), "—"))
+                cols[3].text(row.get("gh_repo", ""))
                 _delete_row(
                     cols,
                     f"/admin/repo-modules/{row['plane_module_id']}",
