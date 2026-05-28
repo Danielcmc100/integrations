@@ -87,7 +87,14 @@ async def compute_ready(
     for run in check_runs:
         name_raw: Any = run.get("name")
         conclusion_raw: Any = run.get("conclusion")
-        if isinstance(name_raw, str) and name_raw:
-            conclusions[name_raw] = conclusion_raw if isinstance(conclusion_raw, str) else None
+        started_at_raw: Any = run.get("started_at")
+        if not isinstance(name_raw, str) or not name_raw:
+            continue
+        # Skip placeholder check runs created before CI actually starts.
+        # The Jenkins github-checks plugin sets started_at only when the build
+        # truly begins; an initial "ok" run has started_at=null.
+        if not isinstance(started_at_raw, str) or not started_at_raw:
+            continue
+        conclusions[name_raw] = conclusion_raw if isinstance(conclusion_raw, str) else None
 
     return all(conclusions.get(req) == "success" for req in required)

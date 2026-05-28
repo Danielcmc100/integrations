@@ -96,8 +96,8 @@ def test_no_required_checks_ready() -> None:
 
 def test_all_required_checks_pass() -> None:
     check_runs = [
-        {"name": "ci/test", "conclusion": "success"},
-        {"name": "ci/lint", "conclusion": "success"},
+        {"name": "ci/test", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"},
+        {"name": "ci/lint", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"},
     ]
     client = _make_github_client(
         required_contexts=["ci/test", "ci/lint"], check_runs=check_runs
@@ -113,8 +113,8 @@ def test_all_required_checks_pass() -> None:
 
 def test_one_check_failing_not_ready() -> None:
     check_runs = [
-        {"name": "ci/test", "conclusion": "success"},
-        {"name": "ci/lint", "conclusion": "failure"},
+        {"name": "ci/test", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"},
+        {"name": "ci/lint", "conclusion": "failure", "started_at": "2026-01-01T00:00:00Z"},
     ]
     client = _make_github_client(
         required_contexts=["ci/test", "ci/lint"], check_runs=check_runs
@@ -130,10 +130,52 @@ def test_one_check_failing_not_ready() -> None:
 
 def test_check_in_progress_not_ready() -> None:
     check_runs = [
-        {"name": "ci/test", "conclusion": None},
+        {"name": "ci/test", "conclusion": None, "started_at": "2026-01-01T00:00:00Z"},
     ]
     client = _make_github_client(
         required_contexts=["ci/test"], check_runs=check_runs
+    )
+    result = _run(compute_ready(_make_pr(), client))
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Placeholder check run (started_at=null) — Jenkins github-checks initial state
+# ---------------------------------------------------------------------------
+
+
+def test_placeholder_check_run_not_ready() -> None:
+    """Check run with started_at=null is a placeholder; must not count as green."""
+    check_runs = [
+        {"name": "ci/test", "conclusion": "success", "started_at": None},
+    ]
+    client = _make_github_client(
+        required_contexts=["ci/test"], check_runs=check_runs
+    )
+    result = _run(compute_ready(_make_pr(), client))
+    assert result is False
+
+
+def test_placeholder_missing_started_at_not_ready() -> None:
+    """Check run without started_at key at all is also a placeholder."""
+    check_runs = [
+        {"name": "ci/test", "conclusion": "success"},
+    ]
+    client = _make_github_client(
+        required_contexts=["ci/test"], check_runs=check_runs
+    )
+    result = _run(compute_ready(_make_pr(), client))
+    assert result is False
+
+
+def test_one_real_one_placeholder_not_ready() -> None:
+    """Real run green + placeholder run = not ready (placeholder skipped, required check missing)."""
+    check_runs = [
+        {"name": "ci/test", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"},
+        {"name": "ci/lint", "conclusion": "success", "started_at": None},
+    ]
+    client = _make_github_client(
+        required_contexts=["ci/test", "ci/lint"], check_runs=check_runs
     )
     result = _run(compute_ready(_make_pr(), client))
     assert result is False
@@ -169,7 +211,7 @@ def test_branch_protection_error_treated_as_no_requirements() -> None:
 
 
 def test_branch_protection_cached() -> None:
-    check_runs = [{"name": "ci/test", "conclusion": "success"}]
+    check_runs = [{"name": "ci/test", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"}]
     client = _make_github_client(
         required_contexts=["ci/test"], check_runs=check_runs
     )
@@ -187,7 +229,7 @@ def test_branch_protection_cached() -> None:
 
 
 def test_branch_protection_cache_expired() -> None:
-    check_runs = [{"name": "ci/test", "conclusion": "success"}]
+    check_runs = [{"name": "ci/test", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"}]
     client = _make_github_client(
         required_contexts=["ci/test"], check_runs=check_runs
     )
