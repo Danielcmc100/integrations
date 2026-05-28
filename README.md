@@ -183,6 +183,35 @@ Matching uses title first, then footer cross-references. Idempotent — safe to 
 | PR closed/merged | Post final line in thread, archive thread |
 | PR unreviewed > 24h | Hourly reminder in Discord thread |
 
+## Webhook payload quirks
+
+### Plane → GitHub
+
+**Assignees format:** Plane sends `assignees` in `card.created` and `card.updated` webhooks as a list of user objects, not UUID strings:
+```json
+"assignees": [{"id": "uuid", "display_name": "user", "email": "...", ...}]
+```
+The handler extracts `.id` from each object. If the field is a plain UUID string (API-created cards), `str(uid)` is used as fallback.
+
+**Labels field name:** Plane may send labels as `label_ids` (list of UUID strings) or `labels` (list of UUID strings or objects depending on context). The handler checks both fields.
+
+**Module at creation time:** When a card is created via the Plane UI with a module selected, the `card.created` webhook includes `module` and/or `module_ids`. Cards created via API without a module require a fallback search across all mapped modules. If the module is assigned after creation, the `card.created` event has already fired — the subsequent `card.updated` may be skipped by loop prevention (5s window).
+
+**Labels vs assignees in card.created payload:** Plane does not always include labels and assignees in the `card.created` payload. They reliably appear in the first non-loop-prevented `card.updated` event.
+
+### GitHub → Plane
+
+**Username casing:** GitHub sends usernames with the canonical casing from the user's profile (e.g. `Danielcmc100`). The `user_map` table stores logins lowercase. All `gh_login` lookups compare case-insensitively.
+
+**Loop prevention:** A 5-second window (`LOOP_WINDOW_SECONDS = 5`) prevents echo loops. Events from the same source within 5s of the last sync on that source are skipped. This means the immediate `card.updated` fired after `card.created` writes the GitHub link to Plane is always skipped — labels and assignees from that update are synced by the next non-skipped event.
+
+### label_map integrity
+
+GitHub label names in `label_map` must exactly match labels that exist in the target repo. Invalid entries cause `create_issue`/`update_issue` calls to fail silently or partially. Verify with:
+```bash
+gh label list --repo owner/repo
+```
+
 ## Development
 
 ```bash
