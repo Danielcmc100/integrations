@@ -50,7 +50,7 @@ def _make_clients(
 
     plane_client = MagicMock()
     plane_client.update_card = AsyncMock()
-    plane_client.get_card = AsyncMock(return_value={"module": None, "module_ids": []})
+    plane_client.list_module_issues = AsyncMock(return_value=[])
 
     github_client = MagicMock()
     github_client.create_issue = AsyncMock(
@@ -63,6 +63,7 @@ def _make_clients(
 
     config_service = MagicMock()
     config_service.get_repo_module = AsyncMock(return_value=repo_map)
+    config_service.get_all_repo_modules = AsyncMock(return_value=[])
 
     return session, plane_client, github_client, config_service
 

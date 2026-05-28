@@ -121,6 +121,13 @@ class PlaneClient:
         response = await self._request("GET", f"{self._ws_prefix(project_id)}/issues/")
         return _as_json_list(response)
 
+    async def list_module_issues(self, project_id: str, module_id: str) -> list[JsonDict]:
+        response = await self._request(
+            "GET",
+            f"{self._ws_prefix(project_id)}/modules/{module_id}/module-issues/",
+        )
+        return _as_json_list(response)
+
 
 def _parse_retry_after(value: str | None) -> float:
     return _safe_float(value, 1.0)

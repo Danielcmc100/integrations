@@ -90,19 +90,29 @@ async def handle_card_created(
         module_id = str(raw_module_ids[0])
 
     if module_id is None:
-        log.debug("card.created: module not in payload, fetching card from API", card_id=card_id)
-        fetched = await plane_client.get_card(project_id, card_id)
-        fetched_module: Any = fetched.get("module")
-        fetched_module_ids_raw: Any = fetched.get("module_ids")
-        fetched_module_ids: list[Any] = (
-            cast("list[Any]", fetched_module_ids_raw)
-            if isinstance(fetched_module_ids_raw, list)
-            else []
+        log.debug(
+            "card.created: module not in payload, searching mapped modules",
+            card_id=card_id,
         )
-        if isinstance(fetched_module, str) and fetched_module:
-            module_id = fetched_module
-        elif fetched_module_ids:
-            module_id = str(fetched_module_ids[0])
+        mapped_modules = await config_service.get_all_repo_modules()
+        for rm in mapped_modules:
+            if rm.plane_project_id != project_id:
+                continue
+            try:
+                module_issues = await plane_client.list_module_issues(project_id, rm.plane_module_id)
+            except Exception:
+                log.debug(
+                    "card.created: failed to list module issues",
+                    module_id=rm.plane_module_id,
+                )
+                continue
+            for mi in module_issues:
+                issue_id = mi.get("issue_id") or mi.get("issue")
+                if str(issue_id) == card_id:
+                    module_id = rm.plane_module_id
+                    break
+            if module_id is not None:
+                break
 
     if module_id is None:
         log.warning("card.created skipped: no module", card_id=card_id)

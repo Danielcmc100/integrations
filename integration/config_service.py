@@ -67,6 +67,10 @@ class ConfigService:
                 return um
         return None
 
+    async def get_all_repo_modules(self) -> list[RepoModuleMap]:
+        await self._ensure_loaded()
+        return list(self._cache.repo_modules)
+
     async def get_repo_module_by_repo(self, gh_repo: str) -> RepoModuleMap | None:
         await self._ensure_loaded()
         for rm in self._cache.repo_modules:
