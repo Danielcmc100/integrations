@@ -155,180 +155,77 @@ def _make_link() -> CardIssueLink:
 
 
 # ---------------------------------------------------------------------------
-# handle_pr_notification
+# handle_pr_notification — state management only, no Discord notification
 # ---------------------------------------------------------------------------
 
 
-def test_pr_opened_ready_notifies() -> None:
+def test_pr_opened_creates_state() -> None:
     pr = _make_pr(draft=False)
     payload = _make_payload(pr, "opened")
-    # results: [no existing state, no CardIssueLink]
-    session = FakeSession(results=[None, None])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
+    session = FakeSession(results=[None])
 
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-            now_fn=lambda: FIXED_TIME,
-        )
-    )
+    _run(handle_pr_notification(payload, session=session))  # type: ignore[arg-type]
 
-    discord_bot.post_review_message.assert_called_once()
     assert len(session.added) == 1
     state = session.added[0]
     assert isinstance(state, PrNotificationState)
     assert state.pr_node_id == PR_NODE_ID
-    assert state.ready_notified_at == FIXED_TIME
-    assert state.discord_message_id == DISCORD_MSG_ID
-    assert session.commit_count == 2  # one for upsert, one for notification
-
-
-def test_pr_opened_draft_no_notify() -> None:
-    pr = _make_pr(draft=True)
-    payload = _make_payload(pr, "opened")
-    session = FakeSession(results=[None])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
-
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-        )
-    )
-
-    discord_bot.post_review_message.assert_not_called()
-    assert len(session.added) == 1  # state still created
+    assert state.ready_notified_at is None
+    assert state.discord_message_id is None
     assert session.commit_count == 1
 
 
-def test_pr_ready_for_review_notifies() -> None:
-    pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "ready_for_review")
-    session = FakeSession(results=[None, None])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
+def test_pr_opened_draft_creates_state() -> None:
+    pr = _make_pr(draft=True)
+    payload = _make_payload(pr, "opened")
+    session = FakeSession(results=[None])
 
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-            now_fn=lambda: FIXED_TIME,
-        )
+    _run(handle_pr_notification(payload, session=session))  # type: ignore[arg-type]
+
+    assert len(session.added) == 1
+    assert session.commit_count == 1
+
+
+def test_pr_reopened_new_cycle_resets_state() -> None:
+    existing_state = _make_pr_state(
+        ready_notified_at=FIXED_TIME, discord_message_id="old-msg"
     )
-
-    discord_bot.post_review_message.assert_called_once()
-
-
-def test_pr_already_notified_no_repost() -> None:
-    existing_state = _make_pr_state(ready_notified_at=FIXED_TIME)
     pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "ready_for_review")
-    # results: [existing state]
+    payload = _make_payload(pr, "reopened")
     session = FakeSession(results=[existing_state])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
 
     _run(
         handle_pr_notification(
             payload,
             session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-        )
-    )
-
-    discord_bot.post_review_message.assert_not_called()
-
-
-def test_pr_reopened_new_cycle_notifies_again() -> None:
-    existing_state = _make_pr_state(
-        ready_notified_at=FIXED_TIME, discord_message_id="old-msg"
-    )
-    pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "reopened")
-    # results: [existing state, no link]
-    session = FakeSession(results=[existing_state, None])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
-
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
             new_cycle=True,
-            now_fn=lambda: FIXED_TIME,
         )
     )
 
-    discord_bot.post_review_message.assert_called_once()
-    assert existing_state.ready_notified_at == FIXED_TIME
-    assert existing_state.discord_message_id == DISCORD_MSG_ID
-    # cycle_id was reset (not old "cycle-001")
+    assert len(session.added) == 0  # existing state mutated, not a new row
+    assert existing_state.ready_notified_at is None
+    assert existing_state.discord_message_id is None
     assert existing_state.last_ready_cycle_id != "cycle-001"
+    assert session.commit_count == 1
 
 
-def test_pr_reopened_existing_state_no_new_row() -> None:
-    existing_state = _make_pr_state(
-        ready_notified_at=FIXED_TIME, discord_message_id="old-msg"
-    )
-    pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "reopened")
-    session = FakeSession(results=[existing_state, None])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
+def test_pr_missing_fields_returns_early() -> None:
+    payload: dict[str, Any] = {
+        "action": "opened",
+        "pull_request": {"node_id": "", "number": 0},
+        "repository": {"full_name": GH_REPO},
+    }
+    session = FakeSession()
 
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-            new_cycle=True,
-            now_fn=lambda: FIXED_TIME,
-        )
-    )
+    _run(handle_pr_notification(payload, session=session))  # type: ignore[arg-type]
 
-    # No new PrNotificationState added; existing one was mutated
     assert len(session.added) == 0
+    assert session.commit_count == 0
 
 
-def test_ci_failure_then_green_no_repost() -> None:
-    """Once notified, subsequent ready events in same cycle do not re-post."""
-    already_notified = _make_pr_state(ready_notified_at=FIXED_TIME)
-    pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "ready_for_review")
-    session = FakeSession(results=[already_notified])
-    github_client = _make_github_client(required_contexts=[])
-    discord_bot = _make_discord_bot()
-
-    _run(
-        handle_pr_notification(
-            payload,
-            session=session,  # type: ignore[arg-type]
-            github_client=github_client,
-            discord_bot=discord_bot,
-            discord_channel_id=DISCORD_CHANNEL_ID,
-        )
-    )
-
-    discord_bot.post_review_message.assert_not_called()
+# ---------------------------------------------------------------------------
+# Discord embed — via handle_check_suite_completed
+# ---------------------------------------------------------------------------
 
 
 def test_pr_embed_has_correct_fields() -> None:
@@ -339,18 +236,20 @@ def test_pr_embed_has_correct_fields() -> None:
         deletions=30,
         requested_reviewers=[{"login": "reviewer1"}, {"login": "reviewer2"}],
     )
-    payload = _make_payload(pr, "opened")
-    session = FakeSession(results=[None, None])
-    github_client = _make_github_client(required_contexts=[])
+    payload = _check_suite_payload()
+    # results: [no existing state, no link (in _check_and_notify), no link (stage trigger)]
+    session = FakeSession(results=[None, None, None])
+    github_client = _make_github_client(required_contexts=[], pr=pr)
     discord_bot = _make_discord_bot()
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
         )
     )
@@ -367,26 +266,26 @@ def test_pr_embed_has_correct_fields() -> None:
     assert "Branch" in field_names
     assert "Changes" in field_names
     assert "Reviewers" in field_names
-    # Link button present
     assert any(isinstance(item, discord.ui.Button) for item in view.children)
 
 
 def test_pr_embed_includes_plane_card_url_when_link_found() -> None:
     pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "opened")
     link = _make_link()
-    # results: [no existing state, CardIssueLink found]
-    session = FakeSession(results=[None, link])
-    github_client = _make_github_client(required_contexts=[])
+    payload = _check_suite_payload()
+    # results: [no existing state, CardIssueLink found (in _check_and_notify), link (stage trigger)]
+    session = FakeSession(results=[None, link, link])
+    github_client = _make_github_client(required_contexts=[], pr=pr)
     discord_bot = _make_discord_bot()
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
             plane_app_url="https://app.plane.so",
             plane_workspace="test-ws",
@@ -401,18 +300,19 @@ def test_pr_embed_includes_plane_card_url_when_link_found() -> None:
 
 def test_pr_notification_uses_correct_channel_id() -> None:
     pr = _make_pr(draft=False)
-    payload = _make_payload(pr, "opened")
-    session = FakeSession(results=[None, None])
-    github_client = _make_github_client(required_contexts=[])
+    payload = _check_suite_payload()
+    session = FakeSession(results=[None, None, None])
+    github_client = _make_github_client(required_contexts=[], pr=pr)
     discord_bot = _make_discord_bot()
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
         )
     )

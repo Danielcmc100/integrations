@@ -720,13 +720,7 @@ async def handle_pr_notification(
     payload: dict[str, Any],
     *,
     session: AsyncSession,
-    github_client: GitHubClient,
-    discord_bot: DiscordBotProtocol,
-    discord_channel_id: str,
     new_cycle: bool = False,
-    now_fn: Callable[[], datetime] = _utcnow,
-    plane_app_url: str | None = None,
-    plane_workspace: str | None = None,
 ) -> None:
     pr_raw: Any = payload.get("pull_request")
     if not isinstance(pr_raw, dict):
@@ -750,22 +744,10 @@ async def handle_pr_notification(
         )
         return
 
-    state = await _upsert_pr_state(
+    await _upsert_pr_state(
         session, pr_node_id, gh_repo, pr_number, new_cycle=new_cycle
     )
     await session.commit()
-
-    await _check_and_notify(
-        pr,
-        state,
-        session=session,
-        github_client=github_client,
-        discord_bot=discord_bot,
-        discord_channel_id=discord_channel_id,
-        now_fn=now_fn,
-        plane_app_url=plane_app_url,
-        plane_workspace=plane_workspace,
-    )
 
 
 async def handle_check_suite_completed(
@@ -1237,16 +1219,8 @@ async def process_github_event(
                     plane_client=ctx["plane_client"],
                 )
         elif "pull_request" in payload and action in ("opened", "ready_for_review"):
-            _db: Any = ctx.get("discord_bot")
-            if _db is not None:
-                async with ctx["session_factory"]() as session:
-                    await handle_pr_notification(
-                        payload,
-                        session=session,
-                        github_client=ctx["github_client"],
-                        discord_bot=_db,
-                        discord_channel_id=settings.discord_review_channel_id,
-                    )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_notification(payload, session=session)
             async with ctx["session_factory"]() as session:
                 await handle_pr_plane_stage(
                     payload,
@@ -1255,17 +1229,8 @@ async def process_github_event(
                     plane_client=ctx["plane_client"],
                 )
         elif "pull_request" in payload and action == "reopened":
-            _db = ctx.get("discord_bot")
-            if _db is not None:
-                async with ctx["session_factory"]() as session:
-                    await handle_pr_notification(
-                        payload,
-                        session=session,
-                        github_client=ctx["github_client"],
-                        discord_bot=_db,
-                        discord_channel_id=settings.discord_review_channel_id,
-                        new_cycle=True,
-                    )
+            async with ctx["session_factory"]() as session:
+                await handle_pr_notification(payload, session=session, new_cycle=True)
             async with ctx["session_factory"]() as session:
                 await handle_pr_plane_stage(
                     payload,

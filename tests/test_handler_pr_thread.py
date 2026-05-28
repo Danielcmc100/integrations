@@ -7,8 +7,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from integration.handlers.github import (
+    handle_check_suite_completed,
     handle_pr_closed_discord,
-    handle_pr_notification,
     handle_pr_review_submitted,
 )
 from integration.models import PrNotificationState
@@ -115,32 +115,44 @@ def _make_discord_bot() -> MagicMock:
     return bot
 
 
-def _make_github_client() -> MagicMock:
+def _make_github_client(pr: dict[str, Any] | None = None) -> MagicMock:
     client = MagicMock()
     client.get_branch_protection = AsyncMock(return_value={})
     client.list_check_runs = AsyncMock(return_value=[])
+    if pr is not None:
+        client.get_pr = AsyncMock(return_value=pr)
     return client
 
 
+def _check_suite_payload(gh_repo: str = GH_REPO, pr_number: int = PR_NUMBER) -> dict[str, Any]:
+    return {
+        "action": "completed",
+        "check_suite": {"pull_requests": [{"number": pr_number}]},
+        "repository": {"full_name": gh_repo},
+    }
+
+
 # ---------------------------------------------------------------------------
-# Thread creation after notification
+# Thread creation — triggered by check_suite.completed, not PR open
 # ---------------------------------------------------------------------------
 
 
 def test_thread_created_after_notification() -> None:
     pr = _make_pr(draft=False)
-    payload = {"action": "opened", "pull_request": pr, "repository": {"full_name": GH_REPO}}
-    session = FakeSession(results=[None, None])
+    payload = _check_suite_payload()
+    # results: [no state, no link (check_and_notify), no link (stage trigger)]
+    session = FakeSession(results=[None, None, None])
     discord_bot = _make_discord_bot()
-    github_client = _make_github_client()
+    github_client = _make_github_client(pr=pr)
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
         )
     )
@@ -156,18 +168,19 @@ def test_thread_created_after_notification() -> None:
 def test_thread_name_truncates_title_at_80_chars() -> None:
     long_title = "A" * 100
     pr = _make_pr(draft=False, title=long_title)
-    payload = {"action": "opened", "pull_request": pr, "repository": {"full_name": GH_REPO}}
-    session = FakeSession(results=[None, None])
+    payload = _check_suite_payload()
+    session = FakeSession(results=[None, None, None])
     discord_bot = _make_discord_bot()
-    github_client = _make_github_client()
+    github_client = _make_github_client(pr=pr)
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
             now_fn=lambda: FIXED_TIME,
         )
     )
@@ -179,18 +192,19 @@ def test_thread_name_truncates_title_at_80_chars() -> None:
 
 def test_no_thread_when_not_ready() -> None:
     pr = _make_pr(draft=True)
-    payload = {"action": "opened", "pull_request": pr, "repository": {"full_name": GH_REPO}}
+    payload = _check_suite_payload()
     session = FakeSession(results=[None])
     discord_bot = _make_discord_bot()
-    github_client = _make_github_client()
+    github_client = _make_github_client(pr=pr)
 
     _run(
-        handle_pr_notification(
+        handle_check_suite_completed(
             payload,
             session=session,  # type: ignore[arg-type]
             github_client=github_client,
             discord_bot=discord_bot,
             discord_channel_id=DISCORD_CHANNEL_ID,
+            plane_client=_make_plane_client(),  # type: ignore[arg-type]
         )
     )
 
