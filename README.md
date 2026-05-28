@@ -19,7 +19,7 @@ FastAPI (port 8000)
 
 ARQ Worker (Redis-backed)
 ├── process_github_event    — issues, pull_request, check_suite, review
-├── process_plane_event     — card.created, card.updated
+├── process_plane_event     — card.created, card.updated, card.deleted
 └── send_review_reminders   — hourly cron
 
 PostgreSQL
@@ -182,6 +182,8 @@ Matching uses title first, then footer cross-references. Idempotent — safe to 
 | PR review submitted | Post in Discord thread |
 | PR closed/merged | Post final line in thread, archive thread |
 | PR unreviewed > 24h | Hourly reminder in Discord thread |
+| Plane card deleted | Delete linked GitHub issue (GraphQL `deleteIssue`) |
+| GitHub issue deleted | Delete linked Plane card |
 
 ## Webhook payload quirks
 

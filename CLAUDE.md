@@ -12,6 +12,8 @@ Bidirectional sync between Plane (kanban), GitHub (issues/PRs), and Discord (not
 - PR ready + CI green → Discord embed + thread
 - Hourly reminders for unreviewed PRs > 24h
 
+> **Rule:** Every new sync behaviour added to the codebase must also be documented in `README.md`.
+
 ## Stack
 
 - **FastAPI** (`main.py`) — webhook receiver on port 8000 (mapped to 200 in prod)
