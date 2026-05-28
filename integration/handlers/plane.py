@@ -220,7 +220,20 @@ async def handle_card_updated(
 
     link = await fetch_link_by_plane(session, card_id)
     if link is None:
-        log.warning("card.updated: no link found", card_id=card_id)
+        log.info(
+            "card.updated: no link found, delegating to card.created",
+            card_id=card_id,
+        )
+        await handle_card_created(
+            payload,
+            session=session,
+            plane_client=plane_client,
+            github_client=github_client,
+            config_service=config_service,
+            now_fn=now_fn,
+            plane_workspace=plane_workspace,
+            plane_app_url=plane_app_url,
+        )
         return
 
     event_updated_at = parse_dt(str(data.get("updated_at") or "")) or now_fn()

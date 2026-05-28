@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from integration.handlers.github import (
     handle_issue_assignees_changed,
@@ -592,7 +592,7 @@ def test_card_updated_loop_prevention_skips() -> None:
     assert session.commit_count == 0
 
 
-def test_card_updated_no_link_skips() -> None:
+def test_card_updated_no_link_backlog_skips() -> None:
     session = FakeSession(link=None)
     github_client = MagicMock()
     github_client.update_issue = AsyncMock()
@@ -605,6 +605,7 @@ def test_card_updated_no_link_skips() -> None:
             "project": PROJECT_ID,
             "name": "Title",
             "updated_at": EVENT_TIME.isoformat(),
+            "state_detail": {"group": "backlog", "name": "Backlog"},
         },
     }
     _run(
@@ -621,6 +622,43 @@ def test_card_updated_no_link_skips() -> None:
     )
     github_client.update_issue.assert_not_called()
     assert session.commit_count == 0
+
+
+def test_card_updated_no_link_non_backlog_delegates_to_created() -> None:
+    """Card moved out of backlog with no existing link → treat as card.created."""
+    session = FakeSession(link=None)
+    github_client = MagicMock()
+    config_service = MagicMock()
+
+    payload: dict[str, Any] = {
+        "event": "card.updated",
+        "data": {
+            "id": CARD_ID,
+            "project": PROJECT_ID,
+            "name": "Title",
+            "updated_at": EVENT_TIME.isoformat(),
+            "state_detail": {"group": "unstarted", "name": "To Do"},
+        },
+    }
+
+    with patch(
+        "integration.handlers.plane.handle_card_created", new_callable=AsyncMock
+    ) as mock_created:
+        _run(
+            handle_card_updated(
+                payload,
+                session=session,  # type: ignore[arg-type]
+                plane_client=MagicMock(),
+                github_client=github_client,
+                config_service=config_service,
+                now_fn=lambda: FIXED_TIME,
+                plane_workspace=PLANE_WORKSPACE,
+                plane_app_url=PLANE_APP_URL,
+            )
+        )
+    mock_created.assert_called_once()
+    called_payload = mock_created.call_args.args[0]
+    assert called_payload == payload
 
 
 def test_card_updated_no_syncable_fields_skips_commit() -> None:
