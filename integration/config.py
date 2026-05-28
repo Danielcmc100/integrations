@@ -27,5 +27,7 @@ class Settings(BaseSettings):
     admin_token: str = ""
     discord_ops_channel_id: str = ""
 
+    jenkins_check_name: str = "CI"
+
 
 settings = Settings()

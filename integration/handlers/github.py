@@ -1141,6 +1141,31 @@ async def handle_pr_closed_unmerged(
     )
 
 
+async def handle_pr_pending_check_run(
+    payload: dict[str, Any],
+    *,
+    github_client: GitHubClient,
+    check_name: str,
+) -> None:
+    pr_raw: Any = payload.get("pull_request")
+    if not isinstance(pr_raw, dict):
+        return
+    pr: dict[str, Any] = cast("dict[str, Any]", pr_raw)
+    repo_raw: Any = payload.get("repository")
+    repo_data: dict[str, Any] = cast("dict[str, Any]", repo_raw) if isinstance(repo_raw, dict) else {}
+    repo_full = str(repo_data.get("full_name", ""))
+    if "/" not in repo_full:
+        return
+    owner, repo = repo_full.split("/", 1)
+    head_raw: Any = pr.get("head")
+    head_data: dict[str, Any] = cast("dict[str, Any]", head_raw) if isinstance(head_raw, dict) else {}
+    head_sha = str(head_data.get("sha", ""))
+    if not head_sha:
+        return
+    await github_client.create_check_run(owner, repo, check_name, head_sha)
+    log.info("pr.pending_check_run.created", repo=repo_full, sha=head_sha, check_name=check_name)
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -1228,6 +1253,11 @@ async def process_github_event(
                     session=session,
                     plane_client=ctx["plane_client"],
                 )
+            await handle_pr_pending_check_run(
+                payload,
+                github_client=ctx["github_client"],
+                check_name=settings.jenkins_check_name,
+            )
         elif "pull_request" in payload and action == "reopened":
             async with ctx["session_factory"]() as session:
                 await handle_pr_notification(payload, session=session, new_cycle=True)
@@ -1238,6 +1268,11 @@ async def process_github_event(
                     session=session,
                     plane_client=ctx["plane_client"],
                 )
+            await handle_pr_pending_check_run(
+                payload,
+                github_client=ctx["github_client"],
+                check_name=settings.jenkins_check_name,
+            )
         elif "check_suite" in payload and action == "completed":
             async with ctx["session_factory"]() as session:
                 await handle_check_suite_completed(
