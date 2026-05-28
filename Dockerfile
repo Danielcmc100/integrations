@@ -15,10 +15,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /usr/local/bin/uv
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --group ui --no-install-project
 
 COPY . .
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --group ui
 
 EXPOSE 8000
 

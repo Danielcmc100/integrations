@@ -92,6 +92,14 @@ class PlaneClient:
         response = await self._request("GET", f"{self._ws_prefix(project_id)}/labels/")
         return _as_json_list(response)
 
+    async def list_projects(self) -> list[JsonDict]:
+        response = await self._request("GET", f"/workspaces/{self._workspace}/projects/")
+        return _as_json_list(response)
+
+    async def list_project_members(self, project_id: str) -> list[JsonDict]:
+        response = await self._request("GET", f"{self._ws_prefix(project_id)}/members/")
+        return _as_json_list(response)
+
     async def list_cycles(self, project_id: str) -> list[JsonDict]:
         response = await self._request("GET", f"{self._ws_prefix(project_id)}/cycles/")
         return _as_json_list(response)

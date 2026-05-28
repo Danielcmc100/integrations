@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from integration.config import settings
-from integration.deps import get_config_service, get_session
+from integration.deps import get_config_service, get_github_client, get_plane_client, get_session
 from integration.models import LabelMap, RepoModuleMap, UserMap
 from main import app
 
@@ -347,3 +347,98 @@ def test_update_user(fake_config_svc: FakeConfigService) -> None:
 def test_delete_user_not_found(client: TestClient) -> None:
     resp = client.delete("/admin/users/999", headers=AUTH)
     assert resp.status_code == 404
+
+
+# --- Proxy endpoints ---
+
+
+class FakePlaneClient:
+    async def list_projects(self) -> list[dict[str, Any]]:
+        return [{"id": "proj-1", "name": "Test Project"}]
+
+    async def list_labels(self, project_id: str) -> list[dict[str, Any]]:
+        return [{"id": "lbl-1", "name": "bug"}]
+
+    async def list_modules(self, project_id: str) -> list[dict[str, Any]]:
+        return [{"id": "mod-1", "name": "Sprint 1"}]
+
+    async def list_project_members(self, project_id: str) -> list[dict[str, Any]]:
+        return [{"member": {"id": "usr-1", "display_name": "Alice"}}]
+
+
+class FakeGitHubClient:
+    async def list_repos(self) -> list[dict[str, Any]]:
+        return [{"full_name": "owner/repo"}]
+
+    async def list_repo_labels(self, owner: str, repo: str) -> list[dict[str, Any]]:
+        return [{"name": "bug", "color": "d73a4a"}]
+
+    async def list_collaborators(self, owner: str, repo: str) -> list[dict[str, Any]]:
+        return [{"login": "alice"}]
+
+
+@pytest.fixture
+def proxy_client(
+    fake_session: FakeSession, fake_config_svc: FakeConfigService
+) -> Iterator[TestClient]:
+    fake_plane = FakePlaneClient()
+    fake_github = FakeGitHubClient()
+
+    async def _session_override() -> AsyncIterator[FakeSession]:
+        yield fake_session
+
+    app.dependency_overrides[get_session] = _session_override
+    app.dependency_overrides[get_config_service] = lambda: fake_config_svc
+    app.dependency_overrides[get_plane_client] = lambda: fake_plane
+    app.dependency_overrides[get_github_client] = lambda: fake_github
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def test_proxy_plane_projects(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/plane/projects", headers=AUTH)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "proj-1"
+
+
+def test_proxy_plane_projects_requires_auth(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/plane/projects")
+    assert resp.status_code == 401
+
+
+def test_proxy_plane_labels(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/plane/projects/proj-1/labels", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["name"] == "bug"
+
+
+def test_proxy_plane_modules(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/plane/projects/proj-1/modules", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["id"] == "mod-1"
+
+
+def test_proxy_plane_members(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/plane/projects/proj-1/members", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["member"]["display_name"] == "Alice"
+
+
+def test_proxy_github_repos(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/github/repos", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["full_name"] == "owner/repo"
+
+
+def test_proxy_github_labels(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/github/repos/owner/repo/labels", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["name"] == "bug"
+
+
+def test_proxy_github_collaborators(proxy_client: TestClient) -> None:
+    resp = proxy_client.get("/admin/github/repos/owner/repo/collaborators", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()[0]["login"] == "alice"

@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+ui = [
+    "requests>=2.32",
+    "streamlit>=1.35",
+]
 dev = [
     "basedpyright==1.39.5",
     "coverage>=7.14.0",

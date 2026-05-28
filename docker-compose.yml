@@ -11,6 +11,23 @@ services:
       redis:
         condition: service_healthy
 
+  admin-ui:
+    build: .
+    command: >
+      uv run streamlit run admin_ui/app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.headless true
+    env_file:
+      - .env
+    environment:
+      - API_BASE=http://app:8000
+    ports:
+      - "201:8501"
+    depends_on:
+      - app
+    restart: unless-stopped
+
   worker:
     build: .
     command: arq integration.worker.WorkerSettings

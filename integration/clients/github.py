@@ -253,6 +253,73 @@ class GitHubClient:
         )
         return _as_json_dict(response)
 
+    async def list_repos(self) -> list[JsonDict]:
+        all_repos: list[JsonDict] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                "/installation/repositories",
+                params={"per_page": 100, "page": page},
+            )
+            raw: Any = response.json()
+            if not isinstance(raw, dict):
+                break
+            data = cast("dict[str, Any]", raw)
+            raw_repos: Any = data.get("repositories", [])
+            if not isinstance(raw_repos, list):
+                break
+            batch = [
+                cast(JsonDict, r) for r in cast("list[Any]", raw_repos) if isinstance(r, dict)
+            ]
+            all_repos.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return all_repos
+
+    async def list_repo_labels(self, owner: str, repo: str) -> list[JsonDict]:
+        all_labels: list[JsonDict] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/labels",
+                params={"per_page": 100, "page": page},
+            )
+            raw: Any = response.json()
+            if not isinstance(raw, list):
+                break
+            batch = [
+                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
+            ]
+            all_labels.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return all_labels
+
+    async def list_collaborators(self, owner: str, repo: str) -> list[JsonDict]:
+        all_collabs: list[JsonDict] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/collaborators",
+                params={"per_page": 100, "page": page},
+            )
+            raw: Any = response.json()
+            if not isinstance(raw, list):
+                break
+            batch = [
+                cast(JsonDict, r) for r in cast("list[Any]", raw) if isinstance(r, dict)
+            ]
+            all_collabs.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return all_collabs
+
 
 def _is_rate_limited(response: httpx.Response) -> bool:
     if response.status_code == 429:

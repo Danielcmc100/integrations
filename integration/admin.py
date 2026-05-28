@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from integration.config import settings
-from integration.deps import ConfigServiceDep, SessionDep
+from integration.deps import ConfigServiceDep, GitHubClientDep, PlaneClientDep, SessionDep
 from integration.models import LabelMap, RepoModuleMap, UserMap
 
 log = structlog.get_logger()
@@ -278,3 +278,72 @@ async def delete_user(
     await session.delete(row)
     await session.commit()
     config_service.invalidate()
+
+
+# --- /admin/plane/* proxy ---
+
+
+@router.get("/plane/projects")
+async def proxy_plane_projects(
+    _auth: AdminAuth,
+    plane: PlaneClientDep,
+) -> list[dict[str, Any]]:
+    return await plane.list_projects()
+
+
+@router.get("/plane/projects/{project_id}/labels")
+async def proxy_plane_labels(
+    project_id: str,
+    _auth: AdminAuth,
+    plane: PlaneClientDep,
+) -> list[dict[str, Any]]:
+    return await plane.list_labels(project_id)
+
+
+@router.get("/plane/projects/{project_id}/modules")
+async def proxy_plane_modules(
+    project_id: str,
+    _auth: AdminAuth,
+    plane: PlaneClientDep,
+) -> list[dict[str, Any]]:
+    return await plane.list_modules(project_id)
+
+
+@router.get("/plane/projects/{project_id}/members")
+async def proxy_plane_members(
+    project_id: str,
+    _auth: AdminAuth,
+    plane: PlaneClientDep,
+) -> list[dict[str, Any]]:
+    return await plane.list_project_members(project_id)
+
+
+# --- /admin/github/* proxy ---
+
+
+@router.get("/github/repos")
+async def proxy_github_repos(
+    _auth: AdminAuth,
+    github: GitHubClientDep,
+) -> list[dict[str, Any]]:
+    return await github.list_repos()
+
+
+@router.get("/github/repos/{owner}/{repo}/labels")
+async def proxy_github_labels(
+    owner: str,
+    repo: str,
+    _auth: AdminAuth,
+    github: GitHubClientDep,
+) -> list[dict[str, Any]]:
+    return await github.list_repo_labels(owner, repo)
+
+
+@router.get("/github/repos/{owner}/{repo}/collaborators")
+async def proxy_github_collaborators(
+    owner: str,
+    repo: str,
+    _auth: AdminAuth,
+    github: GitHubClientDep,
+) -> list[dict[str, Any]]:
+    return await github.list_collaborators(owner, repo)
