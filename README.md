@@ -185,6 +185,76 @@ Matching uses title first, then footer cross-references. Idempotent — safe to 
 | Plane card deleted | Delete linked GitHub issue (GraphQL `deleteIssue`) |
 | GitHub issue deleted | Delete linked Plane card |
 
+## Linking a PR to a Plane card
+
+### Full flow: card creation → PR merge
+
+```
+1. Plane card created in a mapped module
+       ↓
+   Worker: card.created
+       ↓
+2. GitHub issue created  (number = N)
+       ↓
+   card_issue_link row: plane_card_id ↔ gh_repo/issue N
+```
+
+When you open a PR that closes issue N, the system detects the link via **two complementary mechanisms**:
+
+#### Mechanism 1 — Branch name prefix (primary)
+
+Name the branch with the GitHub issue number as prefix:
+
+```
+<issue-number>-short-description
+# e.g.  42-fix-login-crash
+```
+
+When the PR is merged, the handler matches `^(\d+)-` against the branch name and resolves issue 42 → looks up `card_issue_link` → closes the Plane card.
+
+#### Mechanism 2 — PR body keywords (secondary)
+
+Write one of the standard closing keywords in the PR description:
+
+```
+Closes #42
+Fixes #42
+Resolves #42
+```
+
+Keywords are case-insensitive. Multiple references are supported — each linked card gets closed.
+
+> Both mechanisms are additive: if you use both, both issue numbers are collected and processed.
+
+### Step-by-step
+
+| Step | Who | What |
+|---|---|---|
+| 1 | Developer | Creates Plane card in a mapped module |
+| 2 | Worker (`card.created`) | Creates GitHub issue #N |
+| 3 | Developer | Opens branch `N-description` (or any name + `Closes #N` in PR body) |
+| 4 | Developer | Merges PR |
+| 5 | GitHub App | Sends `pull_request.closed` webhook |
+| 6 | Worker (`handle_pr_merged`) | Resolves issue N → finds `card_issue_link` → transitions Plane card to **Done** → posts comment with PR URL |
+
+### Fallback: card created before issue exists
+
+If the branch number or `Closes #N` points to an issue that has no `card_issue_link` row yet (e.g. issue was created outside the sync), the worker falls back to `plane_client.get_card_by_sequence(project_id, N)` — searches Plane for a card with sequence number N. If found, it reads or creates the link.
+
+### What gets written to Plane on merge
+
+- Card state → first state in the **Done** group
+- Comment added: `Fechado via PR <pr_url> (merge <sha>)`
+
+### Common reasons the card is NOT closed on merge
+
+| Symptom | Cause |
+|---|---|
+| Branch name `feature/login` (no number prefix) | Branch doesn't match `^\d+-` pattern |
+| PR body has no closing keyword | Neither mechanism found issue number |
+| Issue N has no `card_issue_link` row | Card was never synced (e.g. was in Backlog when created) |
+| No **Done** state group in Plane project | `handle_pr_merged` logs `no completed state in Plane` |
+
 ## Webhook payload quirks
 
 ### Plane → GitHub
