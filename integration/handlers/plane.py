@@ -107,7 +107,7 @@ async def handle_card_created(
                 )
                 continue
             for mi in module_issues:
-                issue_id = mi.get("issue_id") or mi.get("issue")
+                issue_id = mi.get("id") or mi.get("issue_id") or mi.get("issue")
                 if str(issue_id) == card_id:
                     module_id = rm.plane_module_id
                     break
