@@ -18,22 +18,30 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    stage_trigger_enum = sa.Enum(
-        "branch_created",
-        "pr_opened",
-        "ci_passed",
-        "changes_requested",
-        "pr_approved",
-        "pr_closed",
-        name="stage_trigger",
+    op.execute(
+        "CREATE TYPE IF NOT EXISTS stage_trigger AS ENUM "
+        "('branch_created', 'pr_opened', 'ci_passed', "
+        "'changes_requested', 'pr_approved', 'pr_closed')"
     )
-    stage_trigger_enum.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "stage_map",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("plane_project_id", sa.String(), nullable=False),
-        sa.Column("trigger", stage_trigger_enum, nullable=False),
+        sa.Column(
+            "trigger",
+            sa.Enum(
+                "branch_created",
+                "pr_opened",
+                "ci_passed",
+                "changes_requested",
+                "pr_approved",
+                "pr_closed",
+                name="stage_trigger",
+                create_type=False,
+            ),
+            nullable=False,
+        ),
         sa.Column("plane_state_name", sa.String(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
