@@ -9,7 +9,7 @@ from integration.webhooks import router as webhooks_router
 
 configure_logging()
 
-app = FastAPI(title="PSTG Integrations")
+app = FastAPI(title="PSTG Integrations", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(webhooks_router)
 app.include_router(admin_router)
 
