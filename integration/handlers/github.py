@@ -925,6 +925,50 @@ def _gh_event_label(payload: dict[str, Any]) -> str:
     return action or "unknown"
 
 
+async def handle_issue_deleted(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    plane_client: PlaneClient,
+) -> None:
+    import httpx
+
+    _, gh_repo, issue_number = extract_gh_coords(payload)
+    if not gh_repo or not issue_number:
+        return
+
+    link = await fetch_link_by_gh(session, gh_repo, issue_number)
+    if link is None:
+        log.info(
+            "issues.deleted: no link found, nothing to do",
+            gh_repo=gh_repo,
+            issue_number=issue_number,
+        )
+        return
+
+    try:
+        await plane_client.delete_card(link.plane_project_id, link.plane_card_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            log.info(
+                "issues.deleted: plane card already gone",
+                gh_repo=gh_repo,
+                issue_number=issue_number,
+                plane_card_id=link.plane_card_id,
+            )
+        else:
+            raise
+
+    await session.delete(link)
+    await session.commit()
+    log.info(
+        "issues.deleted -> plane card deleted",
+        gh_repo=gh_repo,
+        issue_number=issue_number,
+        plane_card_id=link.plane_card_id,
+    )
+
+
 async def process_github_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -977,6 +1021,13 @@ async def process_github_event(
         elif "issue" in payload and action == "closed":
             async with ctx["session_factory"]() as session:
                 await handle_issue_closed(
+                    payload,
+                    session=session,
+                    plane_client=ctx["plane_client"],
+                )
+        elif "issue" in payload and action == "deleted":
+            async with ctx["session_factory"]() as session:
+                await handle_issue_deleted(
                     payload,
                     session=session,
                     plane_client=ctx["plane_client"],

@@ -368,6 +368,59 @@ async def handle_card_updated(
     log.info("card.updated synced to github", card_id=card_id, issue_number=issue_number)
 
 
+async def handle_card_deleted(
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession,
+    github_client: GitHubClient,
+) -> None:
+    import httpx
+
+    data_raw: Any = payload.get("data")
+    data: dict[str, Any] = (
+        cast("dict[str, Any]", data_raw) if isinstance(data_raw, dict) else payload
+    )
+    card_id: str = str(data.get("id") or "")
+    if not card_id:
+        log.warning("card.deleted: missing card id in payload")
+        return
+
+    link = await fetch_link_by_plane(session, card_id)
+    if link is None:
+        log.info("card.deleted: no link found, nothing to do", card_id=card_id)
+        return
+
+    try:
+        await github_client.delete_issue(link.gh_issue_node_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            log.info(
+                "card.deleted: github issue already gone",
+                card_id=card_id,
+                gh_issue_number=link.gh_issue_number,
+            )
+        else:
+            raise
+    except RuntimeError as exc:
+        if "NOT_FOUND" in str(exc):
+            log.info(
+                "card.deleted: github issue not found via graphql",
+                card_id=card_id,
+                gh_issue_number=link.gh_issue_number,
+            )
+        else:
+            raise
+
+    await session.delete(link)
+    await session.commit()
+    log.info(
+        "card.deleted -> github issue deleted",
+        card_id=card_id,
+        gh_repo=link.gh_repo,
+        gh_issue_number=link.gh_issue_number,
+    )
+
+
 async def process_plane_event(
     ctx: dict[str, Any], log_id: str, payload_json: str
 ) -> None:
@@ -383,10 +436,11 @@ async def process_plane_event(
         source="plane",
     )
 
-    # Plane sends event="issue" + action="created"/"updated" (observed) or "create"/"update" (docs)
-    # Legacy/test format: event="card.created"/"card.updated"
+    # Plane sends event="issue" + action="created"/"updated"/"deleted" (or "create"/"update"/"delete")
+    # Legacy/test format: event="card.created"/"card.updated"/"card.deleted"
     is_created = event_type == "card.created" or (event_type == "issue" and action in ("created", "create"))
     is_updated = event_type == "card.updated" or (event_type == "issue" and action in ("updated", "update"))
+    is_deleted = event_type == "card.deleted" or (event_type == "issue" and action in ("deleted", "delete"))
     metric_event_type = f"{event_type}.{action}" if action else event_type
 
     log.info("process_plane_event.started", metric_event_type=metric_event_type)
@@ -408,6 +462,12 @@ async def process_plane_event(
                     plane_client=ctx["plane_client"],
                     github_client=ctx["github_client"],
                     config_service=ctx["config_service"],
+                )
+            elif is_deleted:
+                await handle_card_deleted(
+                    payload,
+                    session=session,
+                    github_client=ctx["github_client"],
                 )
             else:
                 log.warning(

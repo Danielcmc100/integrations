@@ -121,6 +121,9 @@ class PlaneClient:
         response = await self._request("GET", f"{self._ws_prefix(project_id)}/issues/")
         return _as_json_list(response)
 
+    async def delete_card(self, project_id: str, card_id: str) -> None:
+        await self._request("DELETE", f"{self._ws_prefix(project_id)}/issues/{card_id}/")
+
     async def list_module_issues(self, project_id: str, module_id: str) -> list[JsonDict]:
         response = await self._request(
             "GET",

@@ -224,6 +224,27 @@ class GitHubClient:
             page += 1
         return all_issues
 
+    async def delete_issue(self, node_id: str) -> None:
+        token = await self._get_installation_token()
+        query = """
+        mutation DeleteIssue($nodeId: ID!) {
+          deleteIssue(input: {issueId: $nodeId}) {
+            clientMutationId
+          }
+        }
+        """
+        response = await self._client.post(
+            "/graphql",
+            headers={"Authorization": f"token {token}"},
+            json={"query": query, "variables": {"nodeId": node_id}},
+        )
+        response.raise_for_status()
+        data: Any = response.json()
+        if isinstance(data, dict):
+            errors: Any = data.get("errors")
+            if errors:
+                raise RuntimeError(f"GraphQL deleteIssue failed: {errors}")
+
     async def get_branch_protection(
         self, owner: str, repo: str, branch: str
     ) -> JsonDict:
