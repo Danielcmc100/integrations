@@ -137,12 +137,13 @@ async def handle_card_created(
     issue_body = f"{card_description}\n\n---\nPlane: {plane_card_url}"
 
     gh_labels: list[str] = []
-    label_ids_raw: Any = data.get("label_ids")
+    label_ids_raw: Any = data.get("label_ids") or data.get("labels")
     if isinstance(label_ids_raw, list):
         for lid in cast("list[Any]", label_ids_raw):
-            lm = await config_service.get_label_map(project_id, str(lid))
+            label_id = lid.get("id") if isinstance(lid, dict) else str(lid)
+            lm = await config_service.get_label_map(project_id, label_id)
             if lm is None:
-                log.info("card.created: unknown Plane label skipped", label_id=lid)
+                log.info("card.created: unknown Plane label skipped", label_id=label_id)
             else:
                 gh_labels.append(lm.gh_label)
 
@@ -150,7 +151,8 @@ async def handle_card_created(
     assignees_raw: Any = data.get("assignees")
     if isinstance(assignees_raw, list):
         for uid in cast("list[Any]", assignees_raw):
-            um = await config_service.get_user_map(str(uid))
+            user_id = uid.get("id") if isinstance(uid, dict) else str(uid)
+            um = await config_service.get_user_map(user_id)
             if um is None:
                 log.info("card.created: unknown Plane user skipped", user_id=uid)
             else:
@@ -284,13 +286,14 @@ async def handle_card_updated(
         clean_desc = strip_footer(plane_desc)
         update_payload["body"] = f"{clean_desc}\n\n---\nPlane: {plane_card_url}"
 
-    label_ids_raw: Any = data.get("label_ids")
+    label_ids_raw: Any = data.get("label_ids") or data.get("labels")
     if isinstance(label_ids_raw, list):
         gh_labels: list[str] = []
         for lid in cast("list[Any]", label_ids_raw):
-            lm = await config_service.get_label_map(project_id, str(lid))
+            label_id = lid.get("id") if isinstance(lid, dict) else str(lid)
+            lm = await config_service.get_label_map(project_id, label_id)
             if lm is None:
-                log.info("card.updated: unknown Plane label skipped", label_id=lid)
+                log.info("card.updated: unknown Plane label skipped", label_id=label_id)
             else:
                 gh_labels.append(lm.gh_label)
         update_payload["labels"] = gh_labels
@@ -299,7 +302,8 @@ async def handle_card_updated(
     if isinstance(assignees_raw, list):
         gh_assignees: list[str] = []
         for uid in cast("list[Any]", assignees_raw):
-            um = await config_service.get_user_map(str(uid))
+            user_id = uid.get("id") if isinstance(uid, dict) else str(uid)
+            um = await config_service.get_user_map(user_id)
             if um is None:
                 log.info("card.updated: unknown Plane user skipped", user_id=uid)
             else:
